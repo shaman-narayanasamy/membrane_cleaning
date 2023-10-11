@@ -1,0 +1,30 @@
+__default__:
+    time: "0-01:00:00"
+    partition: "batch"
+    nodes: 1
+    ntasks: 1
+    ncpus: 1
+    job-name: "{rule}"
+    mail-user: "shaman.narayanasamy@uni.lu"
+    output: "{rule}-{jobid}.log"
+    error: "{rule}-{jobid}.err"
+    qos: "normal"
+
+magscot_marker_genes:
+    ncpus: 6
+    time: "1-00:00:00"
+
+drep_dereplication:
+    ncpus: 16
+    time: "2-00:00:00"
+    partition: "bigmem"
+
+bakta_annotation:
+    nodes: 1
+    ncpus: 12
+    time: "48:00:00"
+
+catbat_classification:
+    nodes: 1
+    ncpus: 14
+    time: "48:00:00"

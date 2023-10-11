@@ -1,0 +1,9 @@
+rule test_rule_name:
+    input:
+        bin_fasta = "%s/dereplicated_bins/dereplicated_genomes/{bin_id}.fasta" % input_dir
+    output:
+        donefile = "test/{bin_id}/test.done",
+    shell: 
+        """ 
+        touch {output.donefile}
+        """

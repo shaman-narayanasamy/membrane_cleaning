@@ -1,0 +1,12 @@
+name: drep
+channels:
+  - conda-forge
+  - bioconda
+  - ursky
+  - defaults
+dependencies:
+  - drep
+  - prodigal
+  - checkm-genome
+  - centrifuge
+prefix: /home/users/snarayanasamy/miniconda3/envs/drep
