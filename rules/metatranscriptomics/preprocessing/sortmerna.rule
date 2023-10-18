@@ -1,0 +1,11 @@
+rule sortmerna_rrna_removal:
+    input:
+    output:
+    params: 
+        db_path=config['sormerna']['db_path']
+    conda: "../../../envs/sormterna_env.yml"
+    benchmark: "{sample}/benchmarks/preprocessing_rrna_removal.txt"
+    log: "{sample}/logs/preprocessing_rrna_removal.txt"
+    shell: 
+        """
+        """

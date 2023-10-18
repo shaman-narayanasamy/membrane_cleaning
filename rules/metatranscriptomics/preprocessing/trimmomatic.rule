@@ -1,0 +1,11 @@
+rule trimmomatic_trimming:
+    input:
+    output:
+    params: 
+        db_path=config['trimmomatic']['db_path']
+    conda: "../../../envs/trimmomatic_env.yml"
+    benchmark: "{sample}/benchmarks/preprocessing_trimming.txt"
+    log: "{sample}/logs/preprocessing_trimming.txt"
+    shell: 
+        """
+        """
