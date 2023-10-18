@@ -1,0 +1,7 @@
+name: trimmomatic_env
+channels:
+  - bioconda
+dependencies:
+  - trimmomatic
+prefix: /mnt/irisgpfs/users/snarayanasamy/miniconda3/envs/trimmomatic_env
+

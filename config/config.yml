@@ -26,3 +26,6 @@ bakta:
 catbat:
     db_path: "/scratch/users/snarayanasamy/catbat/CAT_prepare_20210107/2021-01-07_CAT_database"
     tx_path: "/scratch/users/snarayanasamy/catbat/CAT_prepare_20210107/2021-01-07_taxonomy"
+
+sortmerna:
+    db_path: "/scratch/users/snarayanasamy/sortmerna/silva_ids_acc_tax"

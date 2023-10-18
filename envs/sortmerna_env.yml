@@ -1,0 +1,7 @@
+name: sortmerna_env
+channels:
+  - bioconda
+dependencies:
+  - sortmerna
+prefix: /mnt/irisgpfs/users/snarayanasamy/miniconda3/envs/sortmerna_env
+
