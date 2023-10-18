@@ -29,21 +29,6 @@ case "${SMK_ARG}" in
         ;;
 esac
 
-#CMD="snakemake ${SMK_ARG} \
-#	-rp \
-#	--rerun-incomplete \
-#	--conda-prefix /mnt/irisgpfs/users/snarayanasamy/miniconda3/envs \
-#	--use-conda \
-#	--conda-frontend mamba \
-#	--configfile $SMK_CONFIG \
-#	--jobs ${SMK_JOBS} \
-#	--cluster-config ${SMK_SLURM_CONFIG} \
-#	--cluster \"${SMK_CLUSTER_ARGS}\"  \
-#	--cluster-cancel scancel \
-#	--printshellcmds \
-#	-ks ${SMK_FILE} \
-#	--until bakta/TBF2_MAGScoT_cleanbin_000010/bakta.done"
-
 CMD="snakemake ${SMK_ARG} \
 	-rp \
 	--configfile $SMK_CONFIG \
