@@ -4,6 +4,7 @@ input_dir_binning: "/scratch/users/snarayanasamy/membrane_cleaning"
 input_dir_dereplication: "/scratch/users/snarayanasamy/membrane_cleaning/output"
 output_dir: "/scratch/users/snarayanasamy/membrane_cleaning/output"
 sample_info: "/scratch/users/snarayanasamy/membrane_cleaning/sample_info.txt"
+mt_data_table: "/scratch/users/snarayanasamy/membrane_cleaning/mt_sample_info.txt"
 
 magscot:
     folder: "/home/users/snarayanasamy/repositories/github/MAGScoT"        
@@ -26,6 +27,10 @@ bakta:
 catbat:
     db_path: "/scratch/users/snarayanasamy/catbat/CAT_prepare_20210107/2021-01-07_CAT_database"
     tx_path: "/scratch/users/snarayanasamy/catbat/CAT_prepare_20210107/2021-01-07_taxonomy"
+
+trimmomatic:
+    adapters_path: "/scratch/users/snarayanasamy/membrane_cleaning/MT/adapters.fa"
+
 
 sortmerna:
     db_path: "/scratch/users/snarayanasamy/sortmerna/silva_ids_acc_tax"
