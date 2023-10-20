@@ -6,15 +6,18 @@ rule trimmomatic_trimming:
         paired_read_1 = "{sample}_{lane}_R1.processed.fastq.gz",
         paired_read_2 = "{sample}_{lane}_R2.processed.fastq.gz",
         unpaired_read_1 = "{sample}_{lane}_R1.unpaired.processed.fastq.gz",
-        unpaired_read_2 = "{sample}_{lane}_R2.unpaired.processed.fastq.gz"
+        unpaired_read_2 = "{sample}_{lane}_R2.unpaired.processed.fastq.gz",
+        unpaired_read = "{sample}_{lane}_SE.processed.fastq.gz"
     params:
         adapters=config['trimmomatic']['adapters_path']
+    threads: 12
     conda: "../../../envs/trimmomatic_env.yml"
     benchmark: os.path.join(output_dir, "{sample}_{lane}/benchmarks/preprocessing_trimming.txt")
     log: os.path.join(output_dir, "{sample}_{lane}/logs/preprocessing_trimming.txt")
     shell: 
         """ 
         trimmomatic PE -phred33 \
+            -threads {threads} \
             {input.read_1} {input.read_2} \
             {output.paired_read_1} {output.unpaired_read_1} \
             {output.paired_read_2} {output.unpaired_read_2} \
@@ -23,4 +26,6 @@ rule trimmomatic_trimming:
             TRAILING:3 \
             SLIDINGWINDOW:4:15 \
             MINLEN:36
+         
+        zcat {output.unpaired_read_1} {output.unpaired_read_2} | gzip > {output.unpaired_read}
         """

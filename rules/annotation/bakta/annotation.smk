@@ -15,6 +15,8 @@ rule bakta_annotation:
     log: "bakta/{bin_id}/logs/bakta_annotation.txt"
     shell: 
         """ 
-        bakta {input.bin_fasta} --force --db {params.db_path} --output {output.out_dir}/ --prefix {wildcards.bin_id}
+        bakta {input.bin_fasta} --force --db {params.db_path} \
+        --output {output.out_dir}/ --prefix {wildcards.bin_id} -t {threads} \
+        --keep-contig-headers
         touch {output.donefile}
         """

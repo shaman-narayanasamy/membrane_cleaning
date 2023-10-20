@@ -28,3 +28,8 @@ catbat_classification:
     nodes: 1
     ncpus: 14
     time: "48:00:00"
+
+trimmomatic_trimming:
+    nodes: 1
+    ncpus: 12
+    time: "48:00:00"

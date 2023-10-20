@@ -17,7 +17,7 @@ input_dir = "/scratch/users/snarayanasamy/membrane_cleaning/MT"
 ## Define output directory
 output_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/preprocessing"
 
-## Define samples
+## Define input files
 # Read the sample table
 sample_table = pd.read_csv(config["mt_data_table"], sep="\t", comment = "#")
 
@@ -37,25 +37,24 @@ for _, row in sample_table.iterrows():
     lane = row['lane']
     expected_outputs.append(f"{sample_name}_{lane}_R1.processed.fastq.gz")
     expected_outputs.append(f"{sample_name}_{lane}_R2.processed.fastq.gz")
+    expected_outputs.append(f"{sample_name}_{lane}_SE.processed.fastq.gz")
+    expected_outputs.append(f"{sample_name}_{lane}_R1.processed.filtered.fastq.gz")
+    expected_outputs.append(f"{sample_name}_{lane}_R2.processed.filtered.fastq.gz")
+    expected_outputs.append(f"{sample_name}_{lane}_SE.processed.filtered.fastq.gz")
 
 workdir:
     output_dir
 
-#include:
-#    '../../rules/metatranscriptomics/preprocessing/multiqc.smk'
+include:
+    '../../rules/metatranscriptomics/preprocessing/multiqc.smk'
 
 include:
     '../../rules/metatranscriptomics/preprocessing/trimmomatic.smk'
 
-#include:
-#    '../../rules/metatranscriptomics/preprocessing/sortmerna.smk'
-
-#print("Expected outputs:")
-#expected_outputs=expand("{sample_name}_{lane}_{read}.processed.fastq.gz", sample_name=sample_names, lane=lanes, read=reads)
-#
-#print(expected_outputs)
+include:
+    '../../rules/metatranscriptomics/preprocessing/sortmerna.smk'
 
 rule all:
-    input:
-        expected_outputs
-        #expand("{sample}_{lane}_{read}.processed.fastq.gz", sample_name=sample_names, lane=lanes, read=reads)
+     input:
+        expected_outputs,
+        "multiqc/report.html"

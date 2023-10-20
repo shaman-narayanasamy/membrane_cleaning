@@ -1,9 +1,0 @@
-rule trimmomatic_trimming:
-    input:
-    output:
-    conda: "../../../envs/multiqc_env.yml"
-    benchmark: "{sample}/benchmarks/preprocessing_multiqc.txt"
-    log: "{sample}/logs/preprocessing_multiqc.txt"
-    shell: 
-        """
-        """
