@@ -1,10 +1,10 @@
 ---
 tmp_dir: "/tmp"
 input_dir_binning: "/scratch/users/snarayanasamy/membrane_cleaning"
-input_dir_dereplication: "/scratch/users/snarayanasamy/membrane_cleaning/output"
 output_dir: "/scratch/users/snarayanasamy/membrane_cleaning/output"
+input_dir_dereplication: "/scratch/users/snarayanasamy/membrane_cleaning/output/binning"
 sample_info: "/scratch/users/snarayanasamy/membrane_cleaning/sample_info.txt"
-mt_data_table: "/scratch/users/snarayanasamy/membrane_cleaning/mt_sample_info.txt"
+mt_data_table: "/scratch/users/snarayanasamy/membrane_cleaning/test_mt_sample_info.txt"
 bins_config: "config/bins_config.yml"
 
 magscot:
@@ -33,4 +33,4 @@ trimmomatic:
     adapters_path: "/scratch/users/snarayanasamy/membrane_cleaning/MT/adapters.fa"
 
 sortmerna:
-    db_path: "/scratch/users/snarayanasamy/sortmerna/silva_ids_acc_tax"
+    db_path: "/scratch/users/snarayanasamy/sortmerna"

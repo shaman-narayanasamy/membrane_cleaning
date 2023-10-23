@@ -5,17 +5,15 @@ PWD = os.getcwd()
 
 # Definition of environmental variables: paths for the source codes, among others
 CONFIG = os.environ.get("CONFIG", "%s/config/config.yml" % PWD)
-# Default to the processing the directory where all bins from all experimental conditions were dereplicated. This can be adjusted in the snakemake command, if required
-
 configfile: CONFIG
 
 tmp_dir = os.environ.get("tmp_dir", config['tmp_dir'])
 
 ## Define input directory
-input_dir = "/scratch/users/snarayanasamy/membrane_cleaning/MT"
+input_dir = "/scratch/users/snarayanasamy/membrane_cleaning/MT/test_files"
 
 ## Define output directory
-output_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/preprocessing"
+output_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/preprocessing/test"
 
 ## Define input files
 # Read the sample table

@@ -11,8 +11,6 @@ SMK_CONFIG="config/config.yml"
 SMK_SLURM_CONFIG="/home/users/snarayanasamy/repositories/github/membrane_cleaning/config/iris_cluster_config.yml"
 SMK_CLUSTER_ARGS="sbatch -p {cluster.partition} -N {cluster.nodes} -n {cluster.ntasks} -c {cluster.ncpus} -t {cluster.time}"
 
-
-
 # Ativate snakemake
 source ~/miniconda3/bin/activate snakemake
 

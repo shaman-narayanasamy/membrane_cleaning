@@ -16,7 +16,7 @@ tmp_dir = os.environ.get("tmp_dir", config['tmp_dir'])
 input_dir = os.environ.get("input_dir", config['input_dir_binning'])
 
 ## Define output directory
-output_dir = os.environ.get("output_dir", config['output_dir'])
+output_dir = os.path.join(config['output_dir'], "binning")
  
 ## Define samples
 # Read the sample table

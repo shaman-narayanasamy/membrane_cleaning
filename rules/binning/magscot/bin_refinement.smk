@@ -3,7 +3,8 @@ rule magscot_bin_refinement:
         contig_to_bin = "{sample}/contig_to_bin.tsv",
         markers_hmm = "{sample}/markers.hmm"
     output:
-        outdir = ensure(directory("{sample}/magscot"), non_empty = True)
+        outdir = ensure(directory("{sample}/magscot"), non_empty = True),
+        binning_results="{sample}/magscot/MAGScoT.refined.contig_to_bin.out"
     params: magscot_folder = config["magscot"]["folder"]
     conda: "../../../envs/magscot_env.yml"
     group: "binning"
