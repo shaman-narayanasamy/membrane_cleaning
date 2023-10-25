@@ -2,12 +2,10 @@ rule drep_dereplication:
     input:
         bins = "{condition}/bin_paths.txt"
     output:
-        output_dir = directory("{condition}/dereplicated_bins"),
-        #donefile = "{condition}/drep.done"
-    threads: 12
+        output_dir = directory("{condition}/dereplicated_bins")
+    threads: 16
     conda: 
         "../../../envs/drep_env.yml"
-    group: "dereplication"
     benchmark: "{condition}/benchmarks/drep_derepliction.txt"
     log: "{condition}/logs/drep.txt"
     shell: 

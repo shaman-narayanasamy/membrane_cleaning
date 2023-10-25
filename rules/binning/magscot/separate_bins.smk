@@ -5,7 +5,6 @@ rule magscot_separate_bins:
     output:
         separate_bins=ensure(directory("{sample}/magscot_bins"), non_empty = True)
     conda: "../../../envs/pullseq_env.yml"
-    group: "binning"
     benchmark: "{sample}/benchmarks/binning_separate_bins.txt"
     log: "{sample}/logs/binning_separate_bins.txt"
     shell:

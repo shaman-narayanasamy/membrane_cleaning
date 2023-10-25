@@ -26,6 +26,11 @@ rule trimmomatic_trimming:
             TRAILING:3 \
             SLIDINGWINDOW:4:15 \
             MINLEN:36
-         
-        zcat {output.unpaired_read_1} {output.unpaired_read_2} | gzip > {output.unpaired_read}
+
+        # Check if the unpaired files exist and are non-empty
+        if [[ -s {output.unpaired_read_1} && -s {output.unpaired_read_2} ]]; then
+            zcat {output.unpaired_read_1} {output.unpaired_read_2} | gzip > {output.unpaired_read}
+        else
+            touch {output.unpaired_read}
+        fi
         """

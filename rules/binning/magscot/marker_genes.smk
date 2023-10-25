@@ -14,7 +14,6 @@ rule magscot_marker_genes:
         magscot_folder = config["magscot"]["folder"]
     threads: 12
     conda: "../../../envs/magscot_env.yml"
-    group: "binning"
     benchmark: "{sample}/benchmarks/binning_marker_genes.txt"
     log: "{sample}/logs/binning_marker_genes.txt"
     shell: 

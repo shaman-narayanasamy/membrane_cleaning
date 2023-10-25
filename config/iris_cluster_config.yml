@@ -11,8 +11,20 @@ __default__:
     qos: "normal"
 
 magscot_marker_genes:
+    ncpus: 12
+    time: "1-00:00:00"
+
+magscot_bin_refinement:
     ncpus: 6
     time: "1-00:00:00"
+
+magscot_separate_bins:
+    ncpus: 1
+    time: "6:00:00"
+
+drep_collect_all_bins:
+    ncpus: 1
+    time: "6:00:00"
 
 drep_dereplication:
     ncpus: 16
@@ -26,8 +38,14 @@ bakta_annotation:
 
 catbat_classification:
     nodes: 1
-    ncpus: 14
+    ncpus: 24
     time: "48:00:00"
+    partition: "bigmem"
+
+catbat_summary:
+    nodes: 1
+    ncpus: 6
+    time: "6:00:00"
 
 trimmomatic_trimming:
     nodes: 1

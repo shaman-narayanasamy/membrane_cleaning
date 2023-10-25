@@ -41,7 +41,7 @@ CMD="snakemake ${SMK_ARG} \
 	--cluster \"${SMK_CLUSTER_ARGS}\"  \
 	--cluster-cancel scancel \
 	--notemp \
-	-ks ${SMK_FILE} \
+	-s ${SMK_FILE} \
 	multiqc/report.html"
 
 echo $CMD

@@ -7,8 +7,7 @@ PWD = os.getcwd()
 CONFIG = os.environ.get("CONFIG", "%s/config/config.yml" % PWD)
 SRCDIR = os.environ.get("SRCDIR", "%s/src" % PWD)
 # Default to the processing the directory where all bins from all experimental conditions were dereplicated. This can be adjusted in the snakemake command, if required
-#CONDITION = os.environ.get("CONDITION", "all")
-CONDITION = os.environ.get("CONDITION", "test")
+CONDITION = os.environ.get("CONDITION", "all")
 
 configfile: CONFIG
 
@@ -44,6 +43,7 @@ include:
 rule all:
     input:
         expand("bakta/{bin_id}/bakta.done", bin_id=bin_ids),
-        "catbat/catbat.done"
+        "catbat/catbat.done",
+        "catbat/catbat_summary.done"
     output:
         touch("annotation.done")

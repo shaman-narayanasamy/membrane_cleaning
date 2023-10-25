@@ -5,7 +5,7 @@ rule drep_collect_all_bins:
         sample_info = config['sample_info']
     output:
         bins = "{condition}/bin_paths.txt"
-    group: "dereplication"
+    threads: 1
     benchmark: "{condition}/benchmarks/collect_all_bins.txt"
     log: "{condition}/logs/collect_all_bins.txt"
     shell:

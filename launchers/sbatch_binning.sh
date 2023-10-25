@@ -42,13 +42,5 @@ CMD="snakemake ${SMK_ARG} \
 	-ks ${SMK_FILE} \
 	magscot_all.done"
 
-#snakemake ${SMK_ARG} \
-#	--rerun-incomplete \
-#	--use-conda \
-#	--conda-frontend mamba \
-#	--cores all \
-#	-kprs ${SMK_FILE} \
-#	magscot_all.done 
-
 echo $CMD
 eval $CMD
