@@ -39,7 +39,6 @@ rule catbat_summary:
         bin_classification = "catbat/BAT.bin2classification.txt"
     output:
         bin_classification_names_added = "catbat/BAT.bin2classification.names_added.txt",
-        bin_classification_summary = "catbat/BAT.bin2classification.summary.txt",
         donefile = "catbat/catbat_summary.done"
     params: 
         db_path=config['catbat']['db_path'],
@@ -54,7 +53,5 @@ rule catbat_summary:
         """        
         CAT add_names -i {input.bin_classification} -o {output.bin_classification_names_added} -t {params.tx_path} --only_official
 
-        CAT summarise -i {output.bin_classification_names_added} -o {output.bin_classification_summary}
-        
         touch {output.donefile}
         """
