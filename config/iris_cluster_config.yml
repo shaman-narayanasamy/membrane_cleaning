@@ -51,3 +51,13 @@ trimmomatic_trimming:
     nodes: 1
     ncpus: 12
     time: "48:00:00"
+
+index_all_transcripts:
+    nodes: 1
+    ncpus: 14
+    time: "48:00:00"
+
+salmon_quant_all:
+    nodes: 1
+    ncpus: 14
+    time: "48:00:00"

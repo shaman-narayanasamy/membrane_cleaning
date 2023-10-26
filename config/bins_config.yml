@@ -1,4 +1,3 @@
-bin_annotation_path: "/scratch/users/snarayanasamy/membrane_cleaning/output/annotation/test/bakta"
 bins:
     - CBF1_MAGScoT_cleanbin_000016
     - CBF1_MAGScoT_cleanbin_000010

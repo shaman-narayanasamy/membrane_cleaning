@@ -1,0 +1,8 @@
+name: salmon_env
+channels:
+  - bioconda
+dependencies:
+  - boost=1.82.0
+  - salmon
+prefix: /mnt/irisgpfs/users/snarayanasamy/miniconda3/envs/salmon_env
+

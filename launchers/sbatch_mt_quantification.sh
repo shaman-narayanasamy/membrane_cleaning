@@ -34,6 +34,7 @@ CMD="snakemake ${SMK_ARG} \
 	--configfile $SMK_CONFIG \
 	--conda-prefix /mnt/irisgpfs/users/snarayanasamy/miniconda3/envs \
 	--use-conda \
+	--use-singularity \
 	--conda-frontend mamba \
 	--configfile $SMK_CONFIG \
 	--jobs $SMK_JOBS \

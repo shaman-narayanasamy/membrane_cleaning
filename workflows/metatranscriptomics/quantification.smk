@@ -17,7 +17,7 @@ with open(config["bins_config"], "r") as file:
 tmp_dir = os.environ.get("tmp_dir", config['tmp_dir'])
 
 ## Define input directory
-input_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/preprocessing"
+input_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/preprocessing/test"
 
 ## Define output directory
 output_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification"
@@ -41,14 +41,21 @@ lanes = sample_table["lane"].tolist()
 workdir:
     output_dir
 
+## All workflow
 include:
-    '../../rules/metatranscriptomics/quantification/salmon/indexing.smk'
+    '../../rules/metatranscriptomics/quantification/salmon/all/indexing.smk'
 
 include:
-    '../../rules/metatranscriptomics/quantification/salmon/pseudoalignment.smk'
+    '../../rules/metatranscriptomics/quantification/salmon/all/pseudoalignment.smk'
+
+include:
+    '../../rules/metatranscriptomics/quantification/map_ids.smk'
+
+## Isolated bin workflow
 
 rule all:
     input:
-        "concatenated_transcripts.fasta",
-        "salmon/index",
-        expand("salmon/{sample}_{lane}_quant", sample = samples, lane = lanes)
+        "all_bin_transcripts.ffn",
+        "salmon/index/all_transcripts",
+        "bin2bakta_id_mappings.tsv",
+        expand("salmon/all/{sample}_{lane}_quant", sample = samples, lane = lanes)

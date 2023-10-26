@@ -6,6 +6,7 @@ input_dir_dereplication: "/scratch/users/snarayanasamy/membrane_cleaning/output/
 sample_info: "/scratch/users/snarayanasamy/membrane_cleaning/sample_info.txt"
 mt_data_table: "/scratch/users/snarayanasamy/membrane_cleaning/test_mt_sample_info.txt"
 bins_config: "config/bins_config.yml"
+bin_annotation_path: "/scratch/users/snarayanasamy/membrane_cleaning/output/annotation/test/bakta"
 
 magscot:
     folder: "/home/users/snarayanasamy/repositories/github/MAGScoT"        
