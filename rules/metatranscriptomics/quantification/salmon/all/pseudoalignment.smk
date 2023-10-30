@@ -7,7 +7,10 @@ rule salmon_quant_all:
         quant_dir = directory("salmon/all/{sample}_{lane}_quant")
     params:
         lib_type = "A",  # Automatic detection of library type. Adjust as necessary.
+        min_assigned_frags = config['salmon']['min_assigned_frags']
     threads: 14     # Adjust based on available resources
+    conda: 
+        "/home/users/snarayanasamy/miniconda3/envs/salmon_env"
     container:
         "https://depot.galaxyproject.org/singularity/salmon:1.8.0--h7e5ed60_1"
     benchmark: "benchmarks/salmon/quant/all/{sample}_{lane}.txt"
@@ -17,5 +20,6 @@ rule salmon_quant_all:
         salmon quant -i {input.index} -l {params.lib_type} \
                      -1 {input.r1} -2 {input.r2} \
                      -p {threads} \
-                     -o {output.quant_dir}
+                     -o {output.quant_dir} \
+                     --minAssignedFrags 1
         """

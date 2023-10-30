@@ -10,10 +10,10 @@ configfile: CONFIG
 tmp_dir = os.environ.get("tmp_dir", config['tmp_dir'])
 
 ## Define input directory
-input_dir = "/scratch/users/snarayanasamy/membrane_cleaning/MT/test_files"
+input_dir = "/scratch/users/snarayanasamy/membrane_cleaning/MT"
 
 ## Define output directory
-output_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/preprocessing/test"
+output_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/preprocessing"
 
 ## Define input files
 # Read the sample table

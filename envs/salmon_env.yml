@@ -1,8 +1,8 @@
-name: salmon_env
+name: salmon_env_new
 channels:
+  - conda-forge
   - bioconda
 dependencies:
-  - boost=1.82.0
-  - salmon
-prefix: /mnt/irisgpfs/users/snarayanasamy/miniconda3/envs/salmon_env
-
+  - boost=1.60.0
+  - salmon=1.10.2
+prefix: /home/users/snarayanasamy/miniconda3/envs/salmon_env/

@@ -61,3 +61,18 @@ salmon_quant_all:
     nodes: 1
     ncpus: 14
     time: "48:00:00"
+
+sortmerna_index_database:
+    nodes: 1
+    ncpus: 14
+    time: "48:00:00"
+
+sortmerna_rrna_removal_paired:
+    nodes: 1
+    ncpus: 14
+    time: "48:00:00"
+
+sortmerna_rrna_removal_single:
+    nodes: 1
+    ncpus: 14
+    time: "48:00:00"

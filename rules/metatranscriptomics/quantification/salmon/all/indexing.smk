@@ -12,8 +12,10 @@ rule index_all_transcripts:
     input:
         all_transcripts="all_bin_transcripts.ffn"
     output:
-        index_dir="salmon/index/all_transcripts"
+        index_dir=directory("salmon/index/all_transcripts")
     threads: 14
+    conda: 
+        "/home/users/snarayanasamy/miniconda3/envs/salmon_env"
     container:
         "https://depot.galaxyproject.org/singularity/salmon:1.8.0--h7e5ed60_1"
     benchmark: "benchmarks/salmon/index/all.txt"

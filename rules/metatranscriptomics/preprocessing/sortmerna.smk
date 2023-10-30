@@ -6,7 +6,7 @@ rule sortmerna_index_database:
         donefile=os.path.join(config['sortmerna']['db_path'], "indices.done")
     params: 
         db_path=config['sortmerna']['db_path']
-    threads: 12
+    threads: 14
     conda: "../../../envs/sortmerna_env.yml"
     benchmark: "benchmarks/sortmerna_index_database.txt"
     log: "logs/sortmerna_index_database.txt"
@@ -14,6 +14,7 @@ rule sortmerna_index_database:
         """
         sortmerna \
             --index 1 \
+            --threads {threads} \
             --ref {params.db_path}/rfam-5.8s-database-id98.fasta \
             --ref {params.db_path}/silva-arc-16s-id95.fasta \
             --ref {params.db_path}/silva-bac-16s-id90.fasta \
@@ -86,7 +87,7 @@ rule sortmerna_rrna_removal_single:
         db_path=config['sortmerna']['db_path'],
         out_prefix_unpaired = "{sample}_{lane}_SE.non_rrna", # output prefix for unpaired reads
         workdir=temp(directory("/tmp/{sample}_{lane}_unpaired_sortmerna_workdir"))
-    threads: 12
+    threads: 14
     conda: "../../../envs/sortmerna_env.yml"
     benchmark: "{sample}_{lane}/benchmarks/preprocessing_rrna_removal_single.txt"
     log: "{sample}_{lane}/logs/preprocessing_rrna_removal_single.txt"
