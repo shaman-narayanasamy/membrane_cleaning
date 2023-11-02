@@ -55,4 +55,5 @@ include:
 rule all:
      input:
         expected_outputs,
-        "multiqc/report.html"
+
+#"multiqc/report.html"

@@ -24,7 +24,7 @@ output_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscri
 
 ## Define input files
 # Read the sample table
-sample_table = pd.read_csv(config["mt_data_table"], sep="\t", comment = "#")
+sample_table = pd.read_csv(config["test_mt_data_table"], sep="\t", comment = "#")
 
 ## Extract input files based on the output of the preprocessing workflow
 #input_files = []

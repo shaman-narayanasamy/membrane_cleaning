@@ -32,7 +32,7 @@ esac
 CMD="snakemake ${SMK_ARG} \
 	-rp \
 	--configfile $SMK_CONFIG \
-	--conda-prefix /mnt/irisgpfs/users/snarayanasamy/miniconda3/envs \
+	--conda-prefix /home/users/snarayanasamy/miniconda3/envs \
 	--use-conda \
 	--conda-frontend mamba \
 	--configfile $SMK_CONFIG \
