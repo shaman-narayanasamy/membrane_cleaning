@@ -6,9 +6,9 @@ rule map_ids:
     shell:
         """
         grep "^>" {input.bin_annotation_path}/*/*.ffn | \
-        cut -f2 -d "/" | \
+        cut -f11 -d '/' | \
         sed -e 's/.ffn:>/\t/g' | \
         cut -f1 -d' ' | \
-        cut -f1,2,3,4 -d_ | \
+        cut -f1,2,3,4 -d'_' | \
         sort | uniq > {output.mappings}
         """
