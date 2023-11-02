@@ -15,7 +15,7 @@ rule index_all_transcripts:
         index_dir=directory("salmon/index/all_transcripts")
     threads: 14
     conda: 
-        "/home/users/snarayanasamy/miniconda3/envs/salmon_env"
+        "../../../../../envs/salmon_env.yml"
     container:
         "https://depot.galaxyproject.org/singularity/salmon:1.8.0--h7e5ed60_1"
     benchmark: "benchmarks/salmon/index/all.txt"

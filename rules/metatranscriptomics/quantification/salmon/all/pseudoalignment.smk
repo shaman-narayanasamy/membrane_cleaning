@@ -10,7 +10,7 @@ rule salmon_quant_all:
         min_assigned_frags = config['salmon']['min_assigned_frags']
     threads: 14     # Adjust based on available resources
     conda: 
-        "/home/users/snarayanasamy/miniconda3/envs/salmon_env"
+        "../../../../../envs/salmon_env.yml"
     container:
         "https://depot.galaxyproject.org/singularity/salmon:1.8.0--h7e5ed60_1"
     benchmark: "benchmarks/salmon/quant/all/{sample}_{lane}.txt"

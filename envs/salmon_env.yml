@@ -2,7 +2,37 @@ name: salmon_env_new
 channels:
   - conda-forge
   - bioconda
+  - ursky
+  - defaults
 dependencies:
-  - boost=1.60.0
-  - salmon=1.10.2
-prefix: /home/users/snarayanasamy/miniconda3/envs/salmon_env/
+  - _libgcc_mutex=0.1=conda_forge
+  - _openmp_mutex=4.5=2_gnu
+  - boost-cpp=1.78.0=h5adbc97_2
+  - bzip2=1.0.8=h7f98852_4
+  - ca-certificates=2023.7.22=hbcca054_0
+  - certifi=2018.8.24=py35_1001
+  - icu=70.1=h27087fc_0
+  - libffi=3.2.1=he1b5a44_1007
+  - libgcc-ng=13.2.0=h807b86a_2
+  - libgomp=13.2.0=h807b86a_2
+  - libhwloc=2.9.1=hd6dc26d_0
+  - libiconv=1.17=h166bdaf_0
+  - libjemalloc=5.3.0=hcb278e6_0
+  - libstdcxx-ng=13.2.0=h7e041cc_2
+  - libxml2=2.10.3=hca2bb57_4
+  - libzlib=1.2.13=hd590300_5
+  - ncurses=6.4=hcb278e6_0
+  - openssl=1.0.2u=h516909a_0
+  - pip=20.3.4=pyhd8ed1ab_0
+  - python=3.5.5=h5001a0f_2
+  - readline=7.0=hf8c457e_1001
+  - salmon=1.10.2=hecfa306_0
+  - setuptools=40.4.3=py35_0
+  - sqlite=3.28.0=h8b20d00_0
+  - tbb=2021.9.0=hf52228f_0
+  - tk=8.6.13=h2797004_0
+  - wheel=0.37.1=pyhd8ed1ab_0
+  - xz=5.2.6=h166bdaf_0
+  - zlib=1.2.13=hd590300_5
+  - zstd=1.5.5=hfc55251_0
+prefix: /home/users/snarayanasamy/miniconda3/envs/salmon_env_new
