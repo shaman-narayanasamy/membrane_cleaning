@@ -69,7 +69,7 @@ sortmerna_index_database:
 
 sortmerna_rrna_removal_paired:
     nodes: 1
-    ncpus: 12
+    ncpus: 24
     time: "48:00:00"
     partition: "bigmem"
 
