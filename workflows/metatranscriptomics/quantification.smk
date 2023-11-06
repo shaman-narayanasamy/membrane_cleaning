@@ -17,14 +17,14 @@ with open(config["bins_config"], "r") as file:
 tmp_dir = os.environ.get("tmp_dir", config['tmp_dir'])
 
 ## Define input directory
-input_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/preprocessing/test"
+input_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/preprocessing"
 
 ## Define output directory
 output_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification"
 
 ## Define input files
 # Read the sample table
-sample_table = pd.read_csv(config["test_mt_data_table"], sep="\t", comment = "#")
+sample_table = pd.read_csv(config["mt_data_table"], sep="\t", comment = "#")
 
 ## Extract input files based on the output of the preprocessing workflow
 #input_files = []
@@ -37,6 +37,7 @@ sample_table = pd.read_csv(config["test_mt_data_table"], sep="\t", comment = "#"
 ## Define samples, lanes and reads for output file wildcards
 samples = sample_table["sample"].tolist()
 lanes = sample_table["lane"].tolist()
+sample_lane_list = [f"{sample}_{lane}" for sample, lane in zip(samples, lanes)]
 
 workdir:
     output_dir
@@ -58,4 +59,4 @@ rule all:
         "all_bin_transcripts.ffn",
         "salmon/index/all_transcripts",
         "bin2bakta_id_mappings.tsv",
-        expand("salmon/all/{sample}_{lane}_quant", sample = samples, lane = lanes)
+        expand("salmon/all/{sample_lane}_quant", sample_lane = sample_lane_list)
