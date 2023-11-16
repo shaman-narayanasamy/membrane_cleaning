@@ -20,12 +20,7 @@ output_dir = "/scratch/users/snarayanasamy/membrane_cleaning/output/metagenomics
 
 ## Define input files
 # Read the sample table
-#sample_table = pd.read_csv(config["mt_data_table"], sep="\t", comment = "#")
-[samples] = glob_wildcards("trimmed_paired_{sample}_R1.fastq.gz")
-
-
-## Define samples, lanes and reads for output file wildcards
-#samples = sample_table["sample"].tolist()
+[samples] = glob_wildcards(os.path.join(input_dir, "{sample}_trimmed_paired_R1.fastq.gz"))
 
 workdir:
     output_dir
