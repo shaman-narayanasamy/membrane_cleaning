@@ -1,0 +1,712 @@
+---
+title: "Metatranscriptomics analyses"
+author: "Shaman Narayanasamy"
+editor: visual
+---
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(googlesheets4)
+library(ggrepel)
+library(limma)
+library(edgeR)
+library(metap)
+
+# tidyverse-friendly packages
+library(tidybulk)
+library(tidySummarizedExperiment) # we'll load this below to show what it can do
+library(plotly)
+library(GGally)
+library(ggnewscale)
+library(patchwork)
+```
+This script explores and analyses the metatranscriptomics data.
+
+## Functions
+### Principal component analysis visualisations 
+```{r}
+visualise_PCA <- function(pca_results, sample_data){
+  
+  sample_info <- sample_data 
+  pca_scores <- 
+      pca_results$x %>% 
+      as_tibble() %>% 
+      bind_cols(sample_ID = rownames(pca_results$x), .) %>% 
+      left_join(sample_info, by = "sample_ID") %>%  
+      select(sample_ID, PC1, PC2, phase, condition, replicate, lane) 
+   
+  p.replicate <- 
+    ggplot(pca_scores, aes(x=PC1, y=PC2, colour = replicate)) +  
+    geom_point() +  
+    theme_bw() +
+    xlab(paste("PC1 - ", round(pca_results$sdev[1]^2 / sum(pca_results$sdev^2) * 100, 2), "%")) +
+    ylab(paste("PC2 - ", round(pca_results$sdev[2]^2 / sum(pca_results$sdev^2) * 100, 2), "%")) +  
+    theme(legend.position = "bottom")
+  
+  p.lane <- ggplot(pca_scores, aes(x=PC1, y=PC2, color=lane)) +
+    geom_point() +
+    theme_bw() +
+    xlab(paste("PC1 - ", round(pca_results$sdev[1]^2 / sum(pca_results$sdev^2) * 100, 2), "%")) +
+    ylab(paste("PC2 - ", round(pca_results$sdev[2]^2 / sum(pca_results$sdev^2) * 100, 2), "%"))+
+    theme(legend.position = "bottom")
+  
+  p.phase <- ggplot(pca_scores, aes(x=PC1, y=PC2, color=phase)) +
+    geom_point() +
+    theme_bw() +
+    xlab(paste("PC1 - ", round(pca_results$sdev[1]^2 / sum(pca_results$sdev^2) * 100, 2), "%")) +
+    ylab(paste("PC2 - ", round(pca_results$sdev[2]^2 / sum(pca_results$sdev^2) * 100, 2), "%"))+
+    theme(legend.position = "bottom")
+  
+  p.condition <- ggplot(pca_scores, aes(x=PC1, y=PC2, color=condition)) +
+    geom_point() +
+    theme_bw() +
+    xlab(paste("PC1 - ", round(pca_results$sdev[1]^2 / sum(pca_results$sdev^2) * 100, 2), "%")) +
+    ylab(paste("PC2 - ", round(pca_results$sdev[2]^2 / sum(pca_results$sdev^2) * 100, 2), "%"))+
+    theme(legend.position = "bottom")
+  
+  p.all <- 
+    p.replicate + p.lane + p.phase + p.condition +
+    plot_layout() 
+  
+  return(p.all)
+}
+```
+
+### Multidimensional scaling visualisations 
+```{r}
+visualise_MDS <- function(count_data, sample_data){ 
+  
+  sample_info <- sample_data 
+  
+  mds_results <- 
+    count_data %>% 
+    #select(-Bakta_ID, -Length, -EffectiveLength, -Name) %>% 
+    select(sample_info %>% pull(sample_ID)) %>% 
+    filter(apply(., 1, function(x) var(x) != 0)) %>% 
+    t() %>% 
+    dist() %>%   
+    cmdscale(k = 2) %>% cbind(rownames(.), .) %>% as_tibble() %>% 
+    select(sample_ID = V1, MDS1 = V2, MDS2 = V3) %>% 
+    mutate(MDS1 = as.numeric(MDS1),
+           MDS2 = as.numeric(MDS2)) %>% 
+    left_join(sample_info, by = "sample_ID") 
+  
+  p.replicate <- 
+    mds_results %>%  
+    ggplot(aes(x = MDS1, y = MDS2, color = replicate)) +
+    geom_point(size = 2) +
+    theme_minimal() +
+    labs(title = "MDS Plot", x = "MDS Dimension 1", y = "MDS Dimension 2") +
+    scale_color_viridis_d() +
+    theme(legend.position = "bottom")
+  
+  p.lane <- 
+    mds_results %>%  
+    ggplot(aes(x = MDS1, y = MDS2, color = lane)) +
+    geom_point(size = 2) +
+    theme_minimal() +
+    labs(x = "MDS Dimension 1", y = "MDS Dimension 2") +
+    scale_color_viridis_d() +
+    theme(legend.position = "bottom")
+  
+  p.phase <- 
+    mds_results %>%  
+    ggplot(aes(x = MDS1, y = MDS2, color = phase)) +
+    geom_point(size = 2) +
+    theme_minimal() +
+    labs(x = "MDS Dimension 1", y = "MDS Dimension 2") +
+    scale_color_viridis_d() +
+    theme(legend.position = "bottom")
+  
+  p.condition <- 
+    mds_results %>%  
+    ggplot(aes(x = MDS1, y = MDS2, color = condition)) +
+    geom_point(size = 2) +
+    theme_minimal() +
+    labs(x = "MDS Dimension 1", y = "MDS Dimension 2") +
+    scale_color_viridis_d() +
+    theme(legend.position = "bottom")
+  
+  p.all <- p.replicate + p.lane + p.phase + p.condition +
+    plot_layout() 
+  return(p.all)
+}
+```
+### Boxplot visualisations
+```{r}
+visualise_boxplot <- function(count_data, sample_data){  
+  
+  sample_info <- sample_data 
+  count_data_long <- 
+    count_data %>% 
+    filter(rowSums(select(., all_of(sample_info %>% pull(sample_ID)))) > 0) %>% 
+    pivot_longer(cols = sample_info %>% pull(sample_ID),
+                 names_to = "sample_ID",
+                 values_to = "value") %>% 
+    mutate(log_value = log(value)) %>% 
+    left_join(sample_info, by = "sample_ID")
+  
+  p.replicate <- 
+    count_data_long %>% 
+    ggplot(aes(x = sample_ID, y = log_value, fill = replicate)) +
+    geom_boxplot() 
+  
+  p.lane <- 
+    count_data_long %>% 
+    ggplot(aes(x = sample_ID, y = log_value, fill = lane)) +
+    geom_boxplot() 
+  
+  p.phase <- 
+    count_data_long %>% 
+    ggplot(aes(x = sample_ID, y = log_value, fill = phase)) +
+    geom_boxplot() 
+  
+  p.condition <- 
+    count_data_long %>% 
+    ggplot(aes(x = sample_ID, y = log_value, fill = condition)) +
+    geom_boxplot() 
+  
+  p.all <- p.replicate + p.lane + p.phase + p.condition +
+    plot_layout() 
+  return(p.all)
+}
+```
+## Read sample information
+```{r}
+sample_info <- 
+  read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = '#') %>% 
+  mutate(sample_ID = paste(sample, lane, sep = '_'),
+         lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
+  select(sample_ID, everything(), -sample, -R1, -R2) %>% 
+  mutate(replicate = as.factor(replicate),
+         lane = as.factor(lane)
+         ) %>% 
+  separate(sample_ID, extra = "drop", into = "sample", remove = FALSE) %>% 
+  mutate(sample = str_remove_all(sample, "[0-9]$"))
+```
+## Assessment of samples
+### Transcripts per million normalised data
+Read in table of TPM normalised data
+```{r}
+tpm_counts <- 
+  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_TPM_counts.tsv") %>% 
+  filter(rowSums(select(., all_of(sample_info$sample_ID))) > 0) 
+```
+#### Principal component analysis (PCA) of all samples
+```{r}
+  tpm_counts %>% 
+  select(-Bakta_ID, -Length, -EffectiveLength, -Name) %>% 
+  filter(apply(., 1, function(x) var(x) != 0)) %>% # Remove features/transcripts that are not expressed at all
+  t() %>%  
+  prcomp(scale. = TRUE) %>% 
+  visualise_PCA(sample_data = sample_info)
+```
+#### Multidimensional Scaling
+```{r}
+tpm_counts %>% visualise_MDS(sample_data = sample_info)
+```
+
+#### Boxplot
+```{r}
+visualise_boxplot(tpm_counts, sample_info)
+```
+### Raw count data
+#### Principal component analysis
+```{r}
+counts <- 
+  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_counts.tsv") %>% 
+  filter(rowSums(select(., all_of(sample_info$sample_ID))) > 0) 
+
+counts %>% 
+  select(-Bakta_ID, -Length, -EffectiveLength, -Name) %>% 
+  filter(apply(., 1, function(x) var(x) != 0)) %>% # Remove features/transcripts that are not expressed at all
+  t() %>%  
+  prcomp(scale. = TRUE) %>% 
+  visualise_PCA(sample_data = sample_info)
+```
+#### Multidimensional scaling
+```{r}
+counts %>% visualise_MDS(sample_data = sample_info)
+```
+
+#### Boxplot
+```{r}
+visualise_boxplot(counts, sample_info)
+```
+## Create expression object
+```{r}
+exp_obj <- 
+  counts %>%  
+  filter(rowSums(select(., all_of(sample_info$sample_ID))) > 0) %>% 
+  pivot_longer(
+    cols = sample_info %>% pull(sample_ID),
+    names_to = "sample_ID", 
+    values_to = "counts") %>% 
+  left_join(sample_info, by = "sample_ID") %>% 
+  separate(sample_ID, into = c("SampleName"), sep = '_', remove = F, extra = "drop") %>% 
+  mutate(SampleName = str_remove(SampleName, "\\d+")) %>% 
+  select(feature = Name, sample = sample_ID, counts, SampleName, condition, phase, replicate, lane, Run = sample_ID, avgLength = EffectiveLength) %>% 
+  as_SummarizedExperiment(.sample = sample,
+                          .transcript = feature,
+                          .abundance = counts)
+```
+### TMM normalisation
+```{r}
+scaled_counts_TMM <- 
+  exp_obj %>%  
+  scale_abundance() %>%  
+  as_tibble() %>% 
+  pivot_wider(id_cols = feature,
+              values_from = counts_scaled,
+              names_from = sample)
+```
+#### Principal component analysis
+```{r}
+scaled_counts_TMM %>% 
+  select(-feature) %>% 
+  filter(apply(., 1, function(x) var(x) != 0)) %>% # Remove features/transcripts that are not expressed at all
+  t() %>%  
+  prcomp(scale. = TRUE) %>% 
+  visualise_PCA(sample_data = sample_info)
+```
+#### Multidimensional scaling
+```{r}
+scaled_counts_TMM %>% visualise_MDS(sample_data = sample_info)
+```
+```{r}
+scaled_counts_TMM %>% visualise_boxplot(sample_data = sample_info)
+```
+### TMMwsp normalisation
+```{r}
+scaled_counts_TMMwsp <- 
+  exp_obj %>%  
+  scale_abundance(method = "TMMwsp") %>%  
+  as_tibble() %>% 
+  pivot_wider(id_cols = feature,
+              values_from = counts_scaled,
+              names_from = sample)
+```
+#### Principal component analysis
+```{r}
+scaled_counts_TMMwsp %>% 
+  select(-feature) %>% 
+  filter(apply(., 1, function(x) var(x) != 0)) %>% # Remove features/transcripts that are not expressed at all
+  t() %>%  
+  prcomp(scale. = TRUE) %>% 
+  visualise_PCA(sample_data = sample_info)
+```
+#### Multidimensional scaling
+```{r}
+scaled_counts_TMMwsp %>% visualise_MDS(sample_data = sample_info)
+```
+```{r}
+scaled_counts_TMMwsp %>% 
+  visualise_boxplot(sample_data = sample_info)
+```
+
+### RLE normalisation
+```{r}
+scaled_counts_RLE <- 
+  exp_obj %>%  
+  scale_abundance(method = "RLE") %>%  
+  as_tibble() %>% 
+  pivot_wider(id_cols = feature,
+              values_from = counts_scaled,
+              names_from = sample)
+```
+#### Principal component analysis
+```{r}
+scaled_counts_RLE %>% 
+  select(-feature) %>% 
+  filter(apply(., 1, function(x) var(x) != 0)) %>% # Remove features/transcripts that are not expressed at all
+  t() %>%  
+  prcomp(scale. = TRUE) %>% 
+  visualise_PCA(sample_data = sample_info)
+```
+#### Multidimensional scaling
+```{r}
+scaled_counts_RLE %>% visualise_MDS(sample_data = sample_info)
+```
+```{r}
+scaled_counts_RLE %>% visualise_boxplot(sample_data = sample_info)
+```
+### Upperquartile normalisation
+```{r}
+scaled_counts_uq <- 
+  exp_obj %>%  
+  scale_abundance(method = "upperquartile") %>%  
+  as_tibble() %>% 
+  pivot_wider(id_cols = feature,
+              values_from = counts_scaled,
+              names_from = sample)
+```
+#### Principal component analysis
+```{r}
+scaled_counts_uq %>% 
+  select(-feature) %>% 
+  filter(apply(., 1, function(x) var(x) != 0)) %>% # Remove features/transcripts that are not expressed at all
+  t() %>%  
+  prcomp(scale. = TRUE) %>% 
+  visualise_PCA(sample_data = sample_info)
+```
+#### Multidimensional scaling
+```{r}
+scaled_counts_uq %>% visualise_MDS(sample_data = sample_info)
+```
+```{r}
+scaled_counts_uq %>% visualise_boxplot(sample_data = sample_info)
+```
+
+### Adjust abundance
+```{r}
+adjusted_counts <- 
+  exp_obj %>%  
+  adjust_abundance(.formula = ~condition + replicate + lane, 
+                   log_transform = TRUE) %>% # Should be applied for RNA-seq data  
+  as_tibble() %>% 
+  pivot_wider(id_cols = feature,
+              values_from = counts_adjusted,
+              names_from = sample)
+```
+#### Principal component analysis
+```{r}
+adjusted_counts %>% 
+  select(-feature) %>% 
+  filter(apply(., 1, function(x) var(x) != 0)) %>% # Remove features/transcripts that are not expressed at all
+  t() %>%  
+  prcomp(scale. = TRUE) %>% 
+  visualise_PCA(sample_data = sample_info)
+```
+#### Multidimensional scaling
+```{r}
+adjusted_counts %>% visualise_MDS(sample_data = sample_info)
+```
+```{r}
+adjusted_counts %>% visualise_boxplot(sample_data = sample_info)
+```
+### Adjusted and scaled data
+Using Combat batch correction with TMMwsp scaling. The latter is recommended for data with very low and very highly expressed transcripts. 
+```{r}
+counts_adjusted <- 
+  exp_obj %>% 
+  adjust_abundance(.formula = ~ condition + replicate + lane, 
+                   log_transform = TRUE) 
+  
+counts_adjusted_scaled <- 
+  counts_adjusted %>% 
+  as_tibble() %>% 
+  select(-counts) %>% 
+  rename(counts = counts_adjusted) %>% 
+  as_SummarizedExperiment(.sample = sample, 
+                          .transcript = feature,
+                          .abundance = counts) %>% 
+  scale_abundance(.abundance = counts, 
+                  method = "TMMwsp") 
+```
+#### Principal component analysis
+```{r}
+counts_adjusted_scaled_wide <- 
+  counts_adjusted_scaled %>% 
+  as_tibble() %>% 
+  #head(n = 1000) %>% 
+  pivot_wider(id_cols = feature, 
+              values_from = counts_scaled,
+              names_from = sample) 
+
+counts_adjusted_scaled_wide %>% 
+  select(-feature) %>% 
+  filter(apply(., 1, function(x) var(x) != 0)) %>% # Remove features/transcripts that are not expressed at all
+  t() %>%  
+  prcomp(scale. = TRUE) %>% 
+  visualise_PCA(sample_data = sample_info)
+```
+#### Multidimensional scaling
+```{r}
+counts_adjusted_scaled_wide %>% visualise_MDS(sample_data = sample_info)
+```
+
+Inspect which sample is causing the characteristics in the plot.
+```{r}
+mds_results <- 
+    counts_adjusted_scaled_wide %>% 
+    select(sample_info %>% pull(sample_ID)) %>% 
+    filter(apply(., 1, function(x) var(x) != 0)) %>% 
+    t() %>% 
+    dist() %>%   
+    cmdscale(k = 2) %>% cbind(rownames(.), .) %>% as_tibble() %>% 
+    select(sample_ID = V1, MDS1 = V2, MDS2 = V3) %>% 
+    mutate(MDS1 = as.numeric(MDS1),
+           MDS2 = as.numeric(MDS2)) %>% 
+    left_join(sample_info, by = "sample_ID") 
+
+mds_results %>%  
+    ggplot(aes(x = MDS1, y = MDS2, color = replicate)) +
+    geom_point(size = 2) +
+    geom_text_repel(aes(label=sample_ID), show.legend=FALSE) +
+    theme_minimal() +
+    labs(title = "MDS Plot", x = "MDS Dimension 1", y = "MDS Dimension 2") +
+    scale_color_viridis_d() +
+    theme(legend.position = "bottom")
+ 
+
+```
+Now, we exclude the TI2_L002 sample and observe the MDS plot
+```{r}
+mds_results <- 
+    counts_adjusted_scaled_wide %>% 
+    select(sample_info %>% pull(sample_ID)) %>% 
+    select(-TI2_L002) %>% 
+    filter(apply(., 1, function(x) var(x) != 0)) %>% 
+    t() %>% 
+    dist() %>%   
+    cmdscale(k = 2) %>% cbind(rownames(.), .) %>% as_tibble() %>% 
+    select(sample_ID = V1, MDS1 = V2, MDS2 = V3) %>% 
+    mutate(MDS1 = as.numeric(MDS1),
+           MDS2 = as.numeric(MDS2)) %>% 
+    left_join(sample_info, by = "sample_ID") 
+
+mds_results %>%  
+    ggplot(aes(x = MDS1, y = MDS2, color = replicate)) +
+    geom_point(size = 2) +
+    geom_text_repel(aes(label=sample_ID), show.legend=FALSE) +
+    theme_minimal() +
+    labs(title = "MDS Plot", x = "MDS Dimension 1", y = "MDS Dimension 2") +
+    scale_color_viridis_d() +
+    theme(legend.position = "bottom")
+ 
+```
+
+```{r}
+counts_adjusted_scaled_wide %>% visualise_boxplot(sample_data = sample_info) 
+```
+```{r}
+## Clear workspace before performing DE analyses
+rm(scaled_counts_RLE, scaled_counts_TMM, scaled_counts_TMMwsp, counts_adjusted_scaled_wide, scaled_counts_uq, tpm_counts)
+gc()
+```
+## Differential expression analyses
+Given that none of the scaling methods work particularly well, we proceed with the standard approach of TMMwsp scaling.
+
+### All data
+Full transcriptomics analyses using all the replicates for differential expression analysis.
+```{r}
+de_all <-
+  exp_obj %>%
+
+  # edgeR QLT
+  test_differential_abundance(
+    ~ condition*phase + replicate + lane,
+    method = "edgeR_quasi_likelihood",
+    prefix = "edgerQLT_"
+  ) %>%
+
+  # edgeR LRT
+  test_differential_abundance(
+    ~ condition*phase + replicate + lane,
+    method = "edgeR_likelihood_ratio",
+    prefix = "edgerLR_"
+  ) %>%
+
+  # limma-voom
+  test_differential_abundance(
+    ~ condition*phase + replicate + lane,
+    method = "limma_voom",
+    prefix = "voom_"
+  ) #%>%
+
+  ## DESeq2
+se <- 
+  exp_obj %>% 
+  as_tibble() %>% 
+  mutate(counts = round(counts)) %>% 
+  as_SummarizedExperiment(.sample = sample, 
+                          .abundance = counts,
+                          .transcript = feature)
+
+result <- 
+  se %>% test_differential_abundance(
+    ~ condition*phase + replicate + lane,
+    method = "DESeq2",
+    prefix = "DESeq2_" 
+    )
+
+# take a look
+
+de_all <- 
+  result %>% as_tibble() %>% 
+  select(contains("DESeq2_")) %>% 
+  bind_cols(de_all %>% as_tibble(), .) %>%  
+  as_SummarizedExperiment(.sample = sample,
+                          .abundance = counts,
+                          .transcript = feature)
+
+write_tsv(de_all %>% as_tibble, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-all.tsv")
+```
+
+### Separate analysis of replicates
+Each replicate is subselected for individual differential expression analysis.
+```{r}
+rm(de_all, se)
+gc()
+
+for (replicate_id in unique(sample_info$replicate)) {
+  # Subset data for the current replicate
+  sub_exp_obj <- exp_obj %>% filter(replicate == replicate_id)
+  
+  de_replicate_tmp <-
+    
+    sub_exp_obj %>%
+  
+    # edgeR QLT
+    test_differential_abundance(
+      ~ condition*phase + lane,
+      method = "edgeR_quasi_likelihood",
+      prefix = "edgerQLT_"
+    ) %>%
+  
+    # edgeR LR
+    test_differential_abundance(
+      ~ condition*phase + lane,
+      method = "edgeR_likelihood_ratio",
+      prefix = "edgerLR_"
+    ) %>%
+  
+    # limma-voom
+    test_differential_abundance(
+      ~ condition*phase + lane,
+      method = "limma_voom",
+      prefix = "voom_"
+    ) #%>%
+  
+    ## DESeq2
+  se <- 
+    sub_exp_obj %>% 
+    as_tibble() %>% 
+    mutate(counts = round(counts)) %>% 
+    as_SummarizedExperiment(.sample = sample, 
+                            .abundance = counts,
+                            .transcript = feature)
+  
+  result <- 
+    se %>% test_differential_abundance(
+      ~ condition*phase + lane,
+      method = "DESeq2",
+      prefix = "DESeq2_" 
+      )
+  
+  # take a look
+  
+  de_replicate_tmp <- 
+    result %>% as_tibble() %>% 
+    select(contains("DESeq2_")) %>% 
+    bind_cols(de_replicate_tmp %>% as_tibble(), .) %>%  
+    as_SummarizedExperiment(.sample = sample,
+                            .abundance = counts,
+                            .transcript = feature) 
+  
+  write_tsv(de_replicate_tmp %>% 
+              as_tibble(), 
+            paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-", replicate_id, ".tsv"))
+  
+rm(de_replicate_tmp)
+  
+}
+```
+
+## Compute composite p-values for complete analyses
+### All data
+```{r}
+de_dat <- read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-all.tsv")
+
+de_dat <- 
+  de_dat %>% 
+  mutate(   
+    composite_p_val_fisher = pmap_dbl( 
+      .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
+      .f = function(p1, p2, p3, p4) {
+        p_values <- na.omit(c(p1, p2, p3, p4))
+        if (length(p_values) == 0) {
+          return(NA_real_)
+        }
+        sumlog(p_values)$p
+      }
+      ),
+    
+    composite_p_val_stouffer = pmap_dbl(
+      .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
+      .f = function(p1, p2, p3, p4) {
+        p_values <- na.omit(c(p1, p2, p3, p4))
+        if (length(p_values) == 0) {
+          return(NA_real_)
+        }
+        metap::sumz(p_values)$p
+      }
+    )
+  ) %>%  
+  mutate( 
+    composite_p_val_fisher_adj = p.adjust(composite_p_val_fisher, method = "BH"),
+    composite_p_val_stouffer_adj = p.adjust(composite_p_val_stouffer, method = "BH")
+  ) 
+
+write_tsv(de_dat, paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_refined-all.tsv"))
+rm(de_dat)
+```
+```{r}
+replicate_id = 1
+
+de_dat <- read_tsv(paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-", replicate_id, ".tsv"))
+
+de_dat <- 
+  de_dat %>% 
+  mutate(   
+    composite_p_val_fisher = pmap_dbl( 
+      .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
+      .f = function(p1, p2, p3, p4) {
+        p_values <- na.omit(c(p1, p2, p3, p4))
+        if (length(p_values) == 0) {
+          return(NA_real_)
+        }
+        sumlog(p_values)$p
+      }
+      ),
+    
+    composite_p_val_stouffer = pmap_dbl(
+      .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
+      .f = function(p1, p2, p3, p4) {
+        p_values <- na.omit(c(p1, p2, p3, p4))
+        if (length(p_values) == 0) {
+          return(NA_real_)
+        }
+        metap::sumz(p_values)$p
+      }
+    )
+  ) %>%  
+  mutate( 
+    composite_p_val_fisher_adj = p.adjust(composite_p_val_fisher, method = "BH"),
+    composite_p_val_stouffer_adj = p.adjust(composite_p_val_stouffer, method = "BH")
+  ) 
+
+write_tsv(de_dat, paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_refined-", replicate_id, ".tsv"))
+rm(de_dat)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

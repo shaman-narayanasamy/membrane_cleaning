@@ -1,0 +1,80 @@
+---
+title: "Membrane cleaning MAG analysis"
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(googlesheets4)
+```
+
+```{r}
+user <- 
+```
+
+## Read drep (Widb) table
+
+The drep table contains the information about the MAGs. The information that is most relevant to use is the completeness and contamination metrics.
+
+```{r}
+drep_table <- 
+  '/scratch/users/snarayanasamy/membrane_cleaning/output/dereplication/all/dereplicated_bins/data_tables/Widb.csv' %>% 
+  sprintf('ssh iris "cat %s"', .) %>% 
+  pipe() %>% 
+  read_csv() 
+```
+
+## Read CAT/BAT table with bin classification
+
+This table contains the taxonomic classification of the bins
+
+```{r}
+bat_table <- 
+  '/mnt/lscratch/users/snarayanasamy/membrane_cleaning/output/annotation/all/catbat/BAT.bin2classification.names_added.txt' %>% 
+  sprintf('ssh iris "cat %s"', .) %>% 
+  pipe() %>% 
+  read_tsv() %>% 
+  rename(genome = `# bin`)
+```
+
+Display the MAGs that have multiple assignments.
+
+```{r}
+bat_table %>% 
+  filter(duplicated(genome)) %>% 
+  select(genome, superkingdom, phylum, class, order, family, genus, species) %>% 
+  knitr::kable()
+```
+
+As we can see, there are no support for most of the taxonomic levels, therefore, we exclude these bins from further analyses.
+
+```{r}
+bat_table <- 
+  bat_table %>% 
+  filter(!duplicated(genome)) 
+```
+
+```{r}
+mag_info <- 
+  inner_join(drep_table, bat_table, by = "genome") %>% 
+  select(genome, completeness, contamination, size, N50, completeness_metric, contamination_metric, superkingdom, phylum, class, order, family, genus, species) %>% 
+  separate(superkingdom, sep = ': ', into = c("superkingdom", "superkingdom_score")) %>% 
+  separate(phylum, sep = ': ', into = c("phylum", "phylum_score")) %>% 
+  separate(class, sep = ': ', into = c("class", "class_score")) %>% 
+  separate(order, sep = ': ', into = c("order", "order_score")) %>% 
+  separate(family, sep = ': ', into = c("family", "family_score")) %>% 
+  separate(genus, sep = ': ', into = c("genus", "genus_score")) %>% 
+  separate(species, sep = ': ', into = c("species", "species_score")) 
+```
+
+```{r}
+taxa_of_interest <- googlesheets4::read_sheet("https://docs.google.com/spreadsheets/d/1w5wCKSBxTwUp__m4_PcbmxbumGaY-9d90i75Gsb5DvQ/edit#gid=1591395475", sheet = "Taxa of interest")
+
+inner_join(taxa_of_interest %>% select(genus), mag_info, by = "genus")
+inner_join(taxa_of_interest %>% select(family), mag_info, by = "family")
+inner_join(taxa_of_interest %>% select(order), mag_info, by = "order")
+inner_join(taxa_of_interest %>% select(class), mag_info, by = "class")
+inner_join(taxa_of_interest %>% select(phylum), mag_info, by = "phylum")
+
+mag_info %>% filter(!is.na(species)) %>% filter(species != "no support")
+```

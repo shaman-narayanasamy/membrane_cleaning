@@ -1,0 +1,655 @@
+---
+title: "MAG-level metatranscriptomics analysis"
+author: "Shaman Narayanasamy"
+editor: source
+---
+
+## Load libraries
+
+```{r}
+library(tidyverse)
+library(googlesheets4)
+library(metap)
+library(sva)
+library(patchwork)
+
+# tidyverse-friendly packages
+library(tidybulk)
+library(tidySummarizedExperiment) # we'll load this below to show what it can do
+library(plotly)
+library(ggrepel)
+library(GGally)
+```
+
+## Select MAG of interest
+
+This part isolates the transcripts from the MAGs of interest.
+
+```{r}
+bakta2MAG_path <- '/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
+
+bakta2MAG <- sprintf('ssh iris "cat %s"', bakta2MAG_path ) %>%   
+  pipe() %>%  
+  read_tsv(col_names = c("MAG_ID", "Bakta_ID"))
+```
+
+```{r}
+sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
+  mutate(sample_ID = paste(sample, lane, sep = '_'),
+         lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
+  select(sample_ID, everything(), -sample, -R1, -R2) 
+
+MAGs_of_interest <- c("TI2_MAGScoT_cleanbin_000096") 
+
+annotation_folder <- '/scratch/users/snarayanasamy/membrane_cleaning/output/annotation/all/bakta/'
+
+MAG_annotation <- 
+  sprintf('ssh iris "cat %s"', paste(annotation_folder, MAGs_of_interest, paste0(MAGs_of_interest, ".tsv"), sep = '/')) %>%  
+  pipe() %>%   
+  read_tsv(comment = "#", col_names = F) %>% 
+  select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9 )
+```
+
+```{r}
+Bakta_IDs_of_interest <- filter(bakta2MAG, MAG_ID %in% c(MAGs_of_interest)) %>% pull(Bakta_ID)
+
+counts <- 
+  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_counts.tsv")
+
+counts <- 
+  counts %>%  
+  filter(Bakta_ID %in% Bakta_IDs_of_interest) %>% 
+  pivot_longer(
+    cols = sample_info %>% pull(sample_ID),
+    names_to = "sample_ID", 
+    values_to = "counts") %>% 
+  left_join(sample_info, by = "sample_ID") %>% 
+  separate(sample_ID, into = c("SampleName"), sep = '_', remove = F, extra = "drop") %>% 
+  mutate(SampleName = str_remove(SampleName, "\\d+")) %>% 
+  select(feature = Name, sample = sample_ID, counts, SampleName, condition, phase, replicate, lane, Run = sample_ID, avgLength = EffectiveLength) %>% 
+  as_SummarizedExperiment(.sample = sample,
+                          .transcript = feature,
+                          .abundance = counts)
+```
+## Preprocess the data
+
+### Convert to deseq2 object to perform housekeeping gene based scaling
+```{r}
+dds <- DESeq2::DESeqDataSet(counts %>% as_tibble() %>% mutate(counts = as.integer(counts + 1),
+                                                              condition = as.factor(condition),
+                                                              phase = as.factor(phase),
+                                                              replicate = as.factor(replicate),
+                                                              lane = as.factor(lane)
+                                                              ) %>% 
+      as_SummarizedExperiment(.abundance = counts, .sample = sample, .transcript = feature),   
+      design = ~ condition*phase + replicate + lane)
+```
+
+### ComBat-seq scaling
+```{r}
+combat_counts <- 
+  ComBat_seq(counts(dds), 
+             batch = colnames(dds) %>% as_tibble() %>% rename(sample = value) %>% left_join(sample_info, by = c("sample" = "sample_ID")) %>% pull(replicate),
+             group = colnames(dds) %>% as_tibble() %>% rename(sample = value) %>% left_join(sample_info, by = c("sample" = "sample_ID")) %>% pull(condition)
+             ) %>% 
+  as_tibble(rownames = "feature") %>% 
+  pivot_longer(cols = sample_info$sample_ID, names_to = "sample", values_to = "combat_counts") %>% 
+  right_join(counts %>% as_tibble(), by = c("feature", "sample")) %>% 
+  dplyr::select(-counts) %>% 
+  rename(counts = combat_counts) %>% 
+  as_SummarizedExperiment(.abundance = counts,
+                          .sample = sample,
+                          .transcript = feature)
+```
+### Housekeeping gene scaling
+#### Assess the expression of housekeeping genes
+```{r}
+housekeeping_genes <- c("gyrA",
+                        "gyrB",
+                        "recA",
+                        "rho",
+                        "ffh",
+                        "fusA",
+                        "dnaK",
+                        "groEL",
+                        "groES")
+
+```
+#### Inspect housekeeping genes across all samples/replicates
+```{r}
+MAG_annotation %>% 
+  filter(gene_symbol %in% housekeeping_genes) %>% 
+  left_join(counts %>% as_tibble(), by = "feature") %>% 
+  group_by(feature, sample) %>% 
+  summarize(
+    avg_count = mean(counts, na.rm = TRUE)
+  ) %>%
+  ungroup() %>% 
+  group_by(feature) %>% 
+    summarize(
+    mean_count = mean(avg_count, na.rm = TRUE),
+    sd_count = sd(avg_count, na.rm = TRUE),
+    cv = sd_count / mean_count
+  ) %>%
+  arrange(cv) %>% 
+  left_join(MAG_annotation)
+```
+
+#### Inspect housekeeping genes within replicates
+```{r message=F, warning=F}
+housekeeping_replicates <- list()
+for (replicate_id in unique(sample_info$replicate)) {
+ 
+   housekeeping_replicates[[replicate_id]] <-  
+     MAG_annotation %>%  
+     filter(gene_symbol %in% housekeeping_genes) %>% 
+     left_join(counts %>% as_tibble(), by = "feature") %>% 
+     filter(replicate == replicate_id) %>% 
+     group_by(feature, sample) %>% 
+     summarize(
+       avg_count = mean(counts, na.rm = TRUE)
+     ) %>%
+     ungroup() %>% 
+     group_by(feature) %>% 
+       summarize(
+       mean_count = mean(avg_count, na.rm = TRUE),
+       sd_count = sd(avg_count, na.rm = TRUE),
+       cv = sd_count / mean_count
+     ) %>%
+     arrange(cv) %>% 
+     left_join(MAG_annotation)
+   
+}
+
+housekeeping_replicates
+```
+In general, there is high variability between the housekeeping genes. Therefore, we select 'dnaK', which shows the lowest variation in most replicates.
+```{r}
+hkg_vector <- rownames(dds) %in% "CLCDCC_00215" 
+dds_hkg <- DESeq2::estimateSizeFactors(dds, controlGenes = hkg_vector)
+
+## Convert back again to tidybulk experimental object to ensure downstream compatibility
+hkg_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(rownames = "feature") %>% 
+  pivot_longer(cols = sample_info$sample_ID, names_to = "sample", values_to = "hkg_counts") %>%  
+  right_join(counts %>% as_tibble(), by = c("feature", "sample")) %>% 
+  dplyr::select(-counts) %>% 
+  rename(counts = hkg_counts) %>% 
+  as_SummarizedExperiment(.abundance = counts,
+                          .sample = sample,
+                          .transcript = feature)
+```
+
+### ComBat-seq and housekeeping normalisation
+#### Inspect housekeeping genes across all samples/replicates
+```{r}
+MAG_annotation %>% 
+  filter(gene_symbol %in% housekeeping_genes) %>% 
+  left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
+  group_by(feature, sample) %>% 
+  summarize(
+    avg_count = mean(counts, na.rm = TRUE)
+  ) %>%
+  ungroup() %>% 
+  group_by(feature) %>% 
+    summarize(
+    mean_count = mean(avg_count, na.rm = TRUE),
+    sd_count = sd(avg_count, na.rm = TRUE),
+    cv = sd_count / mean_count
+  ) %>%
+  arrange(cv) %>% 
+  left_join(MAG_annotation)
+```
+In general, the combat-seq normalisation reduced the amount of overall variation accross all samples/replicates.
+#### Inspect housekeeping genes within each replicate
+```{r message=F, warning=F}
+housekeeping_replicates <- list()
+
+for (replicate_id in unique(sample_info$replicate)) {
+    housekeeping_replicates[[replicate_id]] <-  
+     MAG_annotation %>%  
+     filter(gene_symbol %in% housekeeping_genes) %>% 
+     left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
+     filter(replicate == replicate_id) %>% 
+     group_by(feature, sample) %>% 
+     summarize(
+       avg_count = mean(counts, na.rm = TRUE)
+     ) %>%
+     ungroup() %>% 
+     group_by(feature) %>% 
+       summarize(
+       mean_count = mean(avg_count, na.rm = TRUE),
+       sd_count = sd(avg_count, na.rm = TRUE),
+       cv = sd_count / mean_count
+     ) %>%
+     arrange(cv) %>% 
+     left_join(MAG_annotation)
+}
+
+housekeeping_replicates
+```
+```{r}
+hkg_vector <- rownames(dds) %in% c("CLCDCC_00215", "CLCDCC_10560")
+dds_hkg <- DESeq2::estimateSizeFactors(dds, controlGenes = hkg_vector)
+
+## Convert back again to tidybulk experimental object to ensure downstream compatibility
+hkg_combat_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(rownames = "feature") %>% 
+  pivot_longer(cols = sample_info$sample_ID, names_to = "sample", values_to = "hkg_counts") %>%  
+  right_join(counts %>% as_tibble(), by = c("feature", "sample")) %>% 
+  dplyr::select(-counts) %>% 
+  rename(counts = hkg_counts) %>% 
+  as_SummarizedExperiment(.abundance = counts,
+                          .sample = sample,
+                          .transcript = feature)
+```
+## Visualise data
+Produce visualisations of different normalisations
+```{r}
+# Initiate lists
+## List of PCA plots
+p.pca <- list() 
+
+## List of MDS plots
+p.mds <- list()
+
+## List of boxplots
+p.bp <- list()
+
+## List of density plots
+p.dp <- list()
+```
+### Raw counts
+#### PCA
+```{r}
+p.pca[[1]] <- 
+  counts %>%
+  reduce_dimensions(method = "PCA") %>% 
+  pivot_sample() %>% as_tibble() %>% 
+  ggplot(aes(x = PC1, y = PC2, colour = as.character(replicate), shape = phase)) +
+  geom_point() +
+  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  theme_minimal()
+```
+#### MDS
+```{r}
+p.mds[[1]] <- 
+  counts %>%
+  reduce_dimensions(method = "MDS") %>% 
+  pivot_sample() %>% as_tibble() %>% 
+  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(replicate), shape = phase)) +
+  geom_point() +
+  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  theme_minimal()
+```
+#### Boxplot
+```{r}
+p.bp[[1]] <-  
+  counts %>% as_tibble() %>%  
+  ggplot(aes(x = sample, y = log(counts), fill = as.character(replicate))) +
+  geom_boxplot() 
+```
+#### Density plot
+```{r}
+p.dp[[1]] <-   
+  counts %>% as_tibble() %>%  
+  ggplot(aes(x=counts, color=as.character(sample))) + 
+  geom_density() +
+  scale_x_log10() + 
+  theme_minimal()
+```
+### ComBat-seq counts
+#### PCA
+```{r}
+p.pca[[2]] <- 
+  combat_counts %>%
+  reduce_dimensions(method = "PCA") %>% 
+  pivot_sample() %>% as_tibble() %>% 
+  ggplot(aes(x = PC1, y = PC2, colour = as.character(replicate), shape = phase)) +
+  geom_point() +
+  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  theme_minimal()
+```
+
+#### MDS
+```{r}
+p.mds[[2]] <-  
+  combat_counts %>%
+  reduce_dimensions(method = "MDS") %>% 
+  pivot_sample() %>% as_tibble() %>% 
+  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(replicate), shape = phase)) +
+  geom_point() +
+  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  theme_minimal()
+```
+
+#### Boxplot
+```{r}
+p.bp[[2]] <- 
+  combat_counts %>% as_tibble() %>% 
+  ggplot(aes(x = sample, y = log(counts), fill = as.character(replicate))) + 
+  geom_boxplot() 
+```
+#### Density plot
+```{r}
+p.dp[[2]] <- 
+  combat_counts %>% as_tibble() %>%  
+  ggplot(aes(x=counts, color=as.character(sample))) +
+  geom_density() +
+  scale_x_log10() +
+  theme_minimal()
+```
+### Housekeeping genes normalised counts
+#### PCA
+```{r}
+p.pca[[3]] <- 
+  hkg_counts %>%
+  reduce_dimensions(method = "PCA") %>% 
+  pivot_sample() %>% as_tibble() %>% 
+  ggplot(aes(x = PC1, y = PC2, colour = as.character(replicate), shape = phase)) +
+  geom_point() +
+  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  theme_minimal()
+```
+#### MDS
+```{r}
+p.mds[[3]] <- 
+  hkg_counts %>%
+  reduce_dimensions(method = "MDS") %>% 
+  pivot_sample() %>% as_tibble() %>% 
+  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(replicate), shape = phase)) +
+  geom_point() +
+  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  theme_minimal()
+```
+#### Boxplot
+```{r}
+p.bp[[3]] <- 
+  hkg_counts %>% as_tibble() %>%   
+  ggplot(aes(x = sample, y = log(counts), fill = as.character(replicate))) +
+  geom_boxplot() 
+```
+#### Density plot
+```{r}
+p.dp[[3]] <-  
+  hkg_counts %>% as_tibble() %>%  
+  ggplot(aes(x=counts, color=as.character(sample))) +
+  geom_density() + 
+  scale_x_log10() + 
+  theme_minimal()
+```
+### ComBat-seq and housekeeping gene normalisation
+#### PCA
+```{r}
+p.pca[[4]] <- 
+  hkg_combat_counts %>%
+  reduce_dimensions(method = "PCA") %>% 
+  pivot_sample() %>% as_tibble() %>% 
+  ggplot(aes(x = PC1, y = PC2, colour = as.character(replicate), shape = phase)) +
+  geom_point() +
+  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  theme_minimal()
+```
+#### MDS
+```{r}
+p.mds[[4]] <- 
+  hkg_combat_counts %>%
+  reduce_dimensions(method = "MDS") %>% 
+  pivot_sample() %>% as_tibble() %>% 
+  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(replicate), shape = phase)) +
+  geom_point() +
+  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  theme_minimal()
+```
+#### Boxplot
+```{r}
+p.bp[[4]] <- 
+  hkg_combat_counts %>% as_tibble() %>%  
+  ggplot(aes(x = sample, y = log(counts), fill = as.character(replicate))) +
+  geom_boxplot() 
+```
+#### Density plot
+```{r}
+p.dp[[4]] <- 
+  hkg_combat_counts %>% as_tibble() %>%  
+  ggplot(aes(x=counts, color=as.character(sample))) + 
+  geom_density() +
+  scale_x_log10() + 
+  theme_minimal()
+```
+
+### Combine plots
+```{r}
+p.pca[[1]] + p.pca[[2]] + p.pca[[3]] + p.pca[[4]] + plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "bottom")
+```
+```{r}
+p.mds[[1]] + p.mds[[2]] + p.mds[[3]] + p.mds[[4]] + plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "bottom")
+```
+```{r}
+for (i in 1:length(p.bp)){
+  if (i <= 3){
+    p.bp[[i]] <- 
+      p.bp[[i]] +  
+      theme( 
+        axis.text.x = element_blank(), 
+        axis.title.x = element_blank()
+      ) 
+  } else {
+   p.bp[[i]] <- p.bp[[i]] + 
+     theme(
+       axis.text.x = element_text(angle = 90)
+       )
+  }
+}
+  
+p.bp[[1]] + p.bp[[2]] + p.bp[[3]] + p.bp[[4]] + plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "bottom")
+```
+```{r}
+p.dp[[1]] + p.dp[[2]] + p.dp[[3]] + p.dp[[4]] + plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "left")
+```
+
+## Differential expression analysis
+```{r}
+expr_list <- list(counts, combat_counts, hkg_counts, hkg_combat_counts)
+de_all_list <- list()
+
+for (i in 1:length(expr_list)){
+  
+  #de_all_list[[i]] <- 
+  
+    expr_list[[i]] %>%
+  
+    # edgeR QLT
+    test_differential_abundance(
+      ~ condition*phase + replicate + lane,
+      method = "edgeR_quasi_likelihood",
+      prefix = "edgerQLT_"
+    ) %>%
+  
+    # edgeR LRT
+    test_differential_abundance(
+      ~ condition*phase + replicate + lane,
+      method = "edgeR_likelihood_ratio",
+      prefix = "edgerLR_"
+    ) %>%
+  
+    # limma-voom
+    test_differential_abundance(
+      ~ condition*phase + replicate + lane,
+      method = "limma_voom",
+      prefix = "voom_"
+    ) 
+  
+  ## DESeq2
+  #de_all_list[[i]] <-  
+    expr_list[[i]] %>% 
+    as_tibble() %>% 
+    mutate(counts = round(counts)) %>% 
+    as_SummarizedExperiment(.sample = sample, 
+                            .abundance = counts,
+                            .transcript = feature) %>% 
+    test_differential_abundance(
+      ~ condition*phase + replicate + lane,
+      method = "DESeq2",
+      prefix = "DESeq2_" 
+      ) %>% 
+    as_tibble() %>% 
+    select(contains("DESeq2_")) %>% 
+    bind_cols(de_all_list[[i]] %>% as_tibble(), .) %>%  
+    as_SummarizedExperiment(.sample = sample,
+                            .abundance = counts,
+                            .transcript = feature)
+  
+  de_all_list[[i]] <- 
+    de_all_list[[i]] %>%  
+    as_tibble() %>% 
+    mutate(   
+      composite_p_val_fisher = pmap_dbl( 
+        .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
+        .f = function(p1, p2, p3, p4) {
+          p_values <- na.omit(c(p1, p2, p3, p4))
+          if (length(p_values) == 0) {
+            return(NA_real_)
+          }
+          sumlog(p_values)$p
+        }
+        ),
+      
+      composite_p_val_stouffer = pmap_dbl(
+        .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
+        .f = function(p1, p2, p3, p4) {
+          p_values <- na.omit(c(p1, p2, p3, p4))
+          if (length(p_values) == 0) {
+            return(NA_real_)
+          }
+          metap::sumz(p_values)$p
+        }
+      )
+    ) %>%  
+    mutate( 
+      composite_p_val_fisher_adj = p.adjust(composite_p_val_fisher, method = "BH"),
+      composite_p_val_stouffer_adj = p.adjust(composite_p_val_stouffer, method = "BH")
+    ) 
+  de_all_list[[i]] 
+}
+
+de_all %>% as_tibble() %>% filter(composite_p_val_fisher_adj <= 0.05 & composite_p_val_stouffer_adj <= 0.05) %>% 
+  left_join(MAG_annotation, by = "feature")
+```
+
+```{r}
+de_replicate <- list()
+for (replicate_id in unique(sample_info$replicate)) {
+  
+  print(replicate_id)
+  
+  # Subset data for the current replicate
+  sub_exp_obj <- 
+    counts %>% filter(replicate == replicate_id)
+  
+  de_replicate_tmp <-
+    
+    sub_exp_obj %>%
+  
+    # edgeR QLT
+    test_differential_abundance(
+      ~ condition*phase + lane,
+      method = "edgeR_quasi_likelihood",
+      prefix = "edgerQLT_"
+    ) %>%
+  
+    # edgeR LR
+    test_differential_abundance(
+      ~ condition*phase + lane,
+      method = "edgeR_likelihood_ratio",
+      prefix = "edgerLR_"
+    ) %>%
+  
+    # limma-voom
+    test_differential_abundance(
+      ~ condition*phase + lane,
+      method = "limma_voom",
+      prefix = "voom_"
+    ) 
+  
+    ## DESeq2
+  de_replicate_tmp <- 
+    sub_exp_obj %>% 
+    as_tibble() %>% 
+    mutate(counts = round(counts)) %>% 
+    as_SummarizedExperiment(.sample = sample, 
+                            .abundance = counts,
+                            .transcript = feature) %>%   
+    test_differential_abundance( 
+      ~ condition*phase + lane,
+      method = "DESeq2",
+      prefix = "DESeq2_"  
+      ) %>% 
+    as_tibble() %>% 
+    dplyr::select(contains("DESeq2_")) %>% 
+    bind_cols(de_replicate_tmp %>% as_tibble(), .) %>%  
+    as_SummarizedExperiment(.sample = sample,
+                            .abundance = counts,
+                            .transcript = feature) 
+  
+  de_replicate_tmp <- 
+    de_replicate_tmp %>% 
+    as_tibble() %>%  
+    mutate(   
+      composite_p_val_fisher = pmap_dbl( 
+        .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
+        .f = function(p1, p2, p3, p4) {
+          p_values <- na.omit(c(p1, p2, p3, p4))
+          if (length(p_values) == 0) {
+            return(NA_real_)
+          }
+          sumlog(p_values)$p
+        }
+        ),
+      
+      composite_p_val_stouffer = pmap_dbl(
+        .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
+        .f = function(p1, p2, p3, p4) {
+          p_values <- na.omit(c(p1, p2, p3, p4))
+          if (length(p_values) == 0) {
+            return(NA_real_)
+          }
+          metap::sumz(p_values)$p
+        }
+      )
+    ) %>%  
+    mutate( 
+      composite_p_val_fisher_adj = p.adjust(composite_p_val_fisher, method = "BH"),
+      composite_p_val_stouffer_adj = p.adjust(composite_p_val_stouffer, method = "BH")
+    ) 
+  
+  de_replicate[[replicate_id]] <- de_replicate_tmp
+  
+  rm(de_replicate_tmp)
+}
+
+de_replicate
+
+de_replicate[[3]] %>% filter(composite_p_val_fisher_adj <= 0.05 & composite_p_val_stouffer_adj <= 0.05)
+```
+
+```{r}
+de_all %>%
+  pivot_transcript() %>%
+  select(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue, feature) %>%
+  ggpairs(1:4)
+```
+
+```{r}
+de_all %>% 
+  pivot_transcript() %>%
+  filter(edgerQLT_PValue <= 0.05 | edgerLR_PValue <= 0.05 | voom_P.Value <= 0.05 | DESeq2_pvalue <= 0.05) %>% 
+  as_tibble() %>% 
+  left_join(MAG_annotation %>% select(feature = X6, "function" = X8), by = c("feature"))
+  
+```
+```{r}
+de_all %>% 
+  pivot_transcript() %>%
+  filter(edgerQLT_FDR <= 0.05 & edgerLR_FDR <= 0.05 & voom_adj.P.Val <= 0.05 & DESeq2_padj <= 0.05) %>% 
+  as_tibble() %>% 
+  left_join(MAG_annotation, by = c("feature" = "X6"))
+```
