@@ -6,23 +6,25 @@ editor: source
 
 ## Load libraries
 
-```{r}
+```{r warning=F}
+# tidytranscriptomics-related packages
+library(tidybulk)
+library(tidySummarizedExperiment) # we'll load this below to show what it can do
+library(sva) # Must be loaded AFTER tidySummarizedExperiment as there is a clash in one of the dependency packages
+library(DESeq2)
+
+# tidyverse-friendly packages
 library(tidyverse)
 library(googlesheets4)
 library(metap)
-library(sva)
 library(patchwork)
-
-# tidyverse-friendly packages
-library(tidybulk)
-library(tidySummarizedExperiment) # we'll load this below to show what it can do
 library(plotly)
 library(ggrepel)
 library(GGally)
+library(tidyHeatmap)
 ```
 
 ## Select MAG of interest
-
 This part isolates the transcripts from the MAGs of interest.
 
 ```{r}
@@ -256,6 +258,9 @@ p.bp <- list()
 
 ## List of density plots
 p.dp <- list()
+
+## List of density plots
+p.hm <- list()
 ```
 ### Raw counts
 #### PCA
@@ -266,7 +271,7 @@ p.pca[[1]] <-
   pivot_sample() %>% as_tibble() %>% 
   ggplot(aes(x = PC1, y = PC2, colour = as.character(replicate), shape = phase)) +
   geom_point() +
-  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
 #### MDS
@@ -277,25 +282,51 @@ p.mds[[1]] <-
   pivot_sample() %>% as_tibble() %>% 
   ggplot(aes(x = Dim1, y = Dim2, colour = as.character(replicate), shape = phase)) +
   geom_point() +
-  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
 #### Boxplot
 ```{r}
 p.bp[[1]] <-  
   counts %>% as_tibble() %>%  
-  ggplot(aes(x = sample, y = log(counts), fill = as.character(replicate))) +
+  ggplot(aes(x = .sample, y = log(counts), fill = as.character(replicate))) +
   geom_boxplot() 
 ```
 #### Density plot
 ```{r}
 p.dp[[1]] <-   
   counts %>% as_tibble() %>%  
-  ggplot(aes(x=counts, color=as.character(sample))) + 
+  ggplot(aes(x=counts, color=as.character(.sample))) + 
   geom_density() +
   scale_x_log10() + 
   theme_minimal()
 ```
+
+#### Heatmap
+```{r}
+p.hm[[1]] <- 
+  counts %>% 
+  keep_abundant(minimum_counts = 1) %>% 
+  
+  # extract 100 most variable genes
+  keep_variable(.abundance = counts, top = 100) %>%
+  as_tibble() %>%
+  mutate(replicate = as.character(replicate), 
+         lane = as.character(lane)) %>% 
+  
+  # create heatmap
+  heatmap(
+    .column = sample,
+    .row = feature,
+    .value = counts,
+    transform = log1p,
+    name = "counts"
+  ) %>%
+  add_tile(condition) %>%
+  add_tile(replicate) %>% 
+  add_tile(lane)
+```
+
 ### ComBat-seq counts
 #### PCA
 ```{r}
@@ -305,7 +336,7 @@ p.pca[[2]] <-
   pivot_sample() %>% as_tibble() %>% 
   ggplot(aes(x = PC1, y = PC2, colour = as.character(replicate), shape = phase)) +
   geom_point() +
-  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
 
@@ -317,7 +348,7 @@ p.mds[[2]] <-
   pivot_sample() %>% as_tibble() %>% 
   ggplot(aes(x = Dim1, y = Dim2, colour = as.character(replicate), shape = phase)) +
   geom_point() +
-  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
 
@@ -332,11 +363,36 @@ p.bp[[2]] <-
 ```{r}
 p.dp[[2]] <- 
   combat_counts %>% as_tibble() %>%  
-  ggplot(aes(x=counts, color=as.character(sample))) +
+  ggplot(aes(x=counts, color=as.character(.sample))) +
   geom_density() +
   scale_x_log10() +
   theme_minimal()
 ```
+#### Heatmap
+```{r}
+p.hm[[2]] <- 
+  combat_counts %>% 
+  keep_abundant(minimum_counts = 1) %>% 
+  
+  # extract 100 most variable genes
+  keep_variable(.abundance = counts, top = 100) %>%
+  as_tibble() %>%
+  mutate(replicate = as.character(replicate), 
+         lane = as.character(lane)) %>% 
+  
+  # create heatmap
+  heatmap(
+    .column = sample,
+    .row = feature,
+    .value = counts,
+    transform = log1p,
+    name = "combat"
+  ) %>%
+  add_tile(condition) %>%
+  add_tile(replicate) %>% 
+  add_tile(lane)
+```
+
 ### Housekeeping genes normalised counts
 #### PCA
 ```{r}
@@ -346,7 +402,7 @@ p.pca[[3]] <-
   pivot_sample() %>% as_tibble() %>% 
   ggplot(aes(x = PC1, y = PC2, colour = as.character(replicate), shape = phase)) +
   geom_point() +
-  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
 #### MDS
@@ -357,24 +413,47 @@ p.mds[[3]] <-
   pivot_sample() %>% as_tibble() %>% 
   ggplot(aes(x = Dim1, y = Dim2, colour = as.character(replicate), shape = phase)) +
   geom_point() +
-  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
 #### Boxplot
 ```{r}
 p.bp[[3]] <- 
   hkg_counts %>% as_tibble() %>%   
-  ggplot(aes(x = sample, y = log(counts), fill = as.character(replicate))) +
+  ggplot(aes(x = .sample, y = log(counts), fill = as.character(replicate))) +
   geom_boxplot() 
 ```
 #### Density plot
 ```{r}
 p.dp[[3]] <-  
   hkg_counts %>% as_tibble() %>%  
-  ggplot(aes(x=counts, color=as.character(sample))) +
+  ggplot(aes(x=counts, color=as.character(.sample))) +
   geom_density() + 
   scale_x_log10() + 
   theme_minimal()
+```
+#### Heatmap
+```{r}
+p.hm[[3]] <- 
+  hkg_counts %>% 
+  keep_abundant(minimum_counts = 1) %>% 
+  
+  # extract 100 most variable genes
+  keep_variable(.abundance = counts, top = 100) %>%
+  as_tibble() %>%
+  mutate(replicate = as.character(replicate), 
+         lane = as.character(lane)) %>% 
+  
+  # create heatmap
+  heatmap(
+    .column = sample,
+    .row = feature,
+    .value = counts,
+    transform = log1p
+  ) %>%
+  add_tile(condition) %>%
+  add_tile(replicate) %>% 
+  add_tile(lane)
 ```
 ### ComBat-seq and housekeeping gene normalisation
 #### PCA
@@ -385,7 +464,7 @@ p.pca[[4]] <-
   pivot_sample() %>% as_tibble() %>% 
   ggplot(aes(x = PC1, y = PC2, colour = as.character(replicate), shape = phase)) +
   geom_point() +
-  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
 #### MDS
@@ -396,24 +475,47 @@ p.mds[[4]] <-
   pivot_sample() %>% as_tibble() %>% 
   ggplot(aes(x = Dim1, y = Dim2, colour = as.character(replicate), shape = phase)) +
   geom_point() +
-  geom_text_repel(aes(label = sample), show.legend = FALSE) +
+  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
 #### Boxplot
 ```{r}
 p.bp[[4]] <- 
   hkg_combat_counts %>% as_tibble() %>%  
-  ggplot(aes(x = sample, y = log(counts), fill = as.character(replicate))) +
+  ggplot(aes(x = .sample, y = log(counts), fill = as.character(replicate))) +
   geom_boxplot() 
 ```
 #### Density plot
 ```{r}
 p.dp[[4]] <- 
   hkg_combat_counts %>% as_tibble() %>%  
-  ggplot(aes(x=counts, color=as.character(sample))) + 
+  ggplot(aes(x=counts, color=as.character(.sample))) + 
   geom_density() +
   scale_x_log10() + 
   theme_minimal()
+```
+#### Heatmap
+```{r}
+p.hm[[4]] <- 
+  hkg_combat_counts %>% 
+  keep_abundant(minimum_counts = 1) %>% 
+  
+  # extract 100 most variable genes
+  keep_variable(.abundance = counts, top = 100) %>%
+  as_tibble() %>%
+  mutate(replicate = as.character(replicate), 
+         lane = as.character(lane)) %>% 
+  
+  # create heatmap
+  heatmap(
+    .column = sample,
+    .row = feature,
+    .value = counts,
+    transform = log1p
+  ) %>%
+  add_tile(condition) %>%
+  add_tile(replicate) %>% 
+  add_tile(lane)
 ```
 
 ### Combine plots
@@ -446,210 +548,246 @@ p.bp[[1]] + p.bp[[2]] + p.bp[[3]] + p.bp[[4]] + plot_layout(guides = "collect", 
 p.dp[[1]] + p.dp[[2]] + p.dp[[3]] + p.dp[[4]] + plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "left")
 ```
 
+```{r}
+ht_list <- p.hm[[1]] + p.hm[[2]] #+ p.hm[[3]] + p.hm[[4]] + plot_layout()
+  #plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "left")
+
+yes <- p.hm[[1]]
+no <- p.hm[[2]]
+
+```
 ## Differential expression analysis
+Store all the different expression matrices within a list. The weird distributions for the housekeeping gene normalised sampels cause issues in the downstream analyses. The reason for this is unknown. Hence, we exclude any housekeeping gene -based results.
 ```{r}
-expr_list <- list(counts, combat_counts, hkg_counts, hkg_combat_counts)
-de_all_list <- list()
+expr_list <- list("raw" = counts, "combat" = combat_counts, "hkg" = hkg_counts, "combat_hkg" = hkg_combat_counts)
 
-for (i in 1:length(expr_list)){
-  
-  #de_all_list[[i]] <- 
-  
-    expr_list[[i]] %>%
-  
-    # edgeR QLT
-    test_differential_abundance(
-      ~ condition*phase + replicate + lane,
-      method = "edgeR_quasi_likelihood",
-      prefix = "edgerQLT_"
-    ) %>%
-  
-    # edgeR LRT
-    test_differential_abundance(
-      ~ condition*phase + replicate + lane,
-      method = "edgeR_likelihood_ratio",
-      prefix = "edgerLR_"
-    ) %>%
-  
-    # limma-voom
-    test_differential_abundance(
-      ~ condition*phase + replicate + lane,
-      method = "limma_voom",
-      prefix = "voom_"
-    ) 
-  
-  ## DESeq2
-  #de_all_list[[i]] <-  
-    expr_list[[i]] %>% 
-    as_tibble() %>% 
-    mutate(counts = round(counts)) %>% 
-    as_SummarizedExperiment(.sample = sample, 
-                            .abundance = counts,
-                            .transcript = feature) %>% 
-    test_differential_abundance(
-      ~ condition*phase + replicate + lane,
-      method = "DESeq2",
-      prefix = "DESeq2_" 
-      ) %>% 
-    as_tibble() %>% 
-    select(contains("DESeq2_")) %>% 
-    bind_cols(de_all_list[[i]] %>% as_tibble(), .) %>%  
-    as_SummarizedExperiment(.sample = sample,
-                            .abundance = counts,
-                            .transcript = feature)
-  
-  de_all_list[[i]] <- 
-    de_all_list[[i]] %>%  
-    as_tibble() %>% 
-    mutate(   
-      composite_p_val_fisher = pmap_dbl( 
-        .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
-        .f = function(p1, p2, p3, p4) {
-          p_values <- na.omit(c(p1, p2, p3, p4))
-          if (length(p_values) == 0) {
-            return(NA_real_)
-          }
-          sumlog(p_values)$p
-        }
-        ),
-      
-      composite_p_val_stouffer = pmap_dbl(
-        .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
-        .f = function(p1, p2, p3, p4) {
-          p_values <- na.omit(c(p1, p2, p3, p4))
-          if (length(p_values) == 0) {
-            return(NA_real_)
-          }
-          metap::sumz(p_values)$p
-        }
-      )
-    ) %>%  
-    mutate( 
-      composite_p_val_fisher_adj = p.adjust(composite_p_val_fisher, method = "BH"),
-      composite_p_val_stouffer_adj = p.adjust(composite_p_val_stouffer, method = "BH")
-    ) 
-  de_all_list[[i]] 
-}
-
-de_all %>% as_tibble() %>% filter(composite_p_val_fisher_adj <= 0.05 & composite_p_val_stouffer_adj <= 0.05) %>% 
-  left_join(MAG_annotation, by = "feature")
+names(expr_list)[1]
 ```
-
 ```{r}
-de_replicate <- list()
-for (replicate_id in unique(sample_info$replicate)) {
+## Function: Perform all DE analysis methods on given tables/normalisations including different phases
+compute_DE_genes <- function(expr_list, phase_value = "normal"){ 
   
-  print(replicate_id)
-  
-  # Subset data for the current replicate
-  sub_exp_obj <- 
-    counts %>% filter(replicate == replicate_id)
-  
-  de_replicate_tmp <-
+  for (i in 1:length(expr_list)){ 
+    expr_obj <-
+      expr_list[[i]] %>% 
+      filter(phase == {{ phase_value }}) %>% 
+      keep_abundant(minimum_counts = 1) 
     
-    sub_exp_obj %>%
-  
-    # edgeR QLT
-    test_differential_abundance(
-      ~ condition*phase + lane,
-      method = "edgeR_quasi_likelihood",
-      prefix = "edgerQLT_"
-    ) %>%
-  
-    # edgeR LR
-    test_differential_abundance(
-      ~ condition*phase + lane,
-      method = "edgeR_likelihood_ratio",
-      prefix = "edgerLR_"
-    ) %>%
-  
-    # limma-voom
-    test_differential_abundance(
-      ~ condition*phase + lane,
-      method = "limma_voom",
-      prefix = "voom_"
-    ) 
-  
+    expr_source <- names(expr_list)[i]
+    
+    tmp_de_res <-  
+     
+       expr_obj %>% 
+      # edgeR QLT
+      test_differential_abundance(
+        ~ condition + replicate + lane,
+        method = "edgeR_quasi_likelihood",
+        prefix = paste0(expr_source, "_", "edgerQLT_")
+      ) %>%
+    
+      # edgeR LRT
+      test_differential_abundance(
+        ~ condition + replicate + lane,
+        method = "edgeR_likelihood_ratio",
+        prefix = paste0(expr_source, "_", "edgerLR_")
+      ) %>%
+    
+      # limma-voom
+      test_differential_abundance(
+        ~ condition + replicate + lane,
+        method = "limma_voom",
+        prefix = paste0(expr_source, "_", "voom_")
+      ) 
+    
     ## DESeq2
-  de_replicate_tmp <- 
-    sub_exp_obj %>% 
-    as_tibble() %>% 
-    mutate(counts = round(counts)) %>% 
-    as_SummarizedExperiment(.sample = sample, 
-                            .abundance = counts,
-                            .transcript = feature) %>%   
-    test_differential_abundance( 
-      ~ condition*phase + lane,
-      method = "DESeq2",
-      prefix = "DESeq2_"  
-      ) %>% 
-    as_tibble() %>% 
-    dplyr::select(contains("DESeq2_")) %>% 
-    bind_cols(de_replicate_tmp %>% as_tibble(), .) %>%  
-    as_SummarizedExperiment(.sample = sample,
-                            .abundance = counts,
-                            .transcript = feature) 
+    tmp_de_res <-  
+      expr_obj %>% 
+      as_tibble() %>% 
+      mutate(counts = round(counts)) %>% 
+      as_SummarizedExperiment(.sample = sample, 
+                              .abundance = counts,
+                              .transcript = feature) %>% 
+      test_differential_abundance(
+        ~ condition + replicate + lane,
+        method = "DESeq2",
+        prefix = paste0(expr_source, "_", "DESeq2_")
+        ) %>% 
+      as_tibble() %>% 
+      select(contains("DESeq2_")) %>% 
+      bind_cols(tmp_de_res %>% as_tibble(), .) %>%  
+      as_SummarizedExperiment(.sample = sample,
+                              .abundance = counts,
+                              .transcript = feature)
+     
+    ## Now join the tables 
+    if (i == 1){
+      de_res <- 
+        tmp_de_res %>% 
+        as_tibble() %>% 
+        distinct() %>%   
+        select(-c(".feature",   
+                  ".sample", 
+                  "counts", 
+                  "sample", 
+                  "SampleName", 
+                  "condition", 
+                  "phase", 
+                  "replicate", 
+                  "lane", 
+                  "Run", 
+                  ".abundant")) %>%  
+        distinct()
+    } else {
+      de_res <-  
+        full_join(de_res, 
+                  tmp_de_res %>% as_tibble() %>%   
+                    select(-c(".feature",   
+                              ".sample", 
+                              "counts", 
+                              "sample", 
+                              "SampleName", 
+                              "condition", 
+                              "phase", 
+                              "replicate", 
+                              "lane", 
+                              "Run", 
+                              ".abundant")) %>%  
+                    distinct(),  
+                  by = c("feature", "avgLength")) %>%   
+        distinct() 
+      } 
+  } 
+  return(de_res)
+  }
+```
+
+```{r}
+# Function: Define consistency of directionality
+all_same_direction <- function(values) {
+  non_na_values <- na.omit(values)
+  all(non_na_values > 0) | all(non_na_values < 0)
+}
+```
+
+```{r}
+## Function: Compute composite DE scores such as proportion of significant p-values and composite p-values and adjusted p-values
+compute_composite_DE_results <- function(de_res){ 
+  # List p-value columns
+  pvalue_cols <- 
+    de_res %>% 
+    select(contains("_PValue"), contains("_P.Value"), contains("_pvalue")) %>% 
+    colnames()
   
-  de_replicate_tmp <- 
-    de_replicate_tmp %>% 
-    as_tibble() %>%  
-    mutate(   
-      composite_p_val_fisher = pmap_dbl( 
-        .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
-        .f = function(p1, p2, p3, p4) {
-          p_values <- na.omit(c(p1, p2, p3, p4))
+  # List fold-change columns
+  fc_cols <- 
+    de_res %>% 
+    select(contains("Fold"), contains("FC")) %>%  
+    select(!contains("DESeq2_lfcSE")) %>% 
+    colnames()
+  
+  comp_de_res <-  
+    de_res %>%  
+    rowwise() %>%  
+    mutate(significant_count = sum(across(all_of(pvalue_cols),  
+                                          ~ifelse(is.na(.), NA, . < 0.05)), na.rm = TRUE),  
+           non_na_count = sum(!is.na(across(all_of(pvalue_cols))))) %>%  
+    ungroup() %>%  
+    mutate(significant_proportion = significant_count/non_na_count) %>%  
+    rowwise() %>%  
+    mutate(consistent_direction = all_same_direction(across(all_of(fc_cols)))) %>%
+    ungroup() %>% 
+    mutate(    
+      composite_p_val_fisher = pmap_dbl(  
+        select(., matches("_PValue|P\\.Value|_pvalue")),
+        .f = function(...) { 
+          args <- list(...)
+          p_values <- na.omit(unlist(args))
           if (length(p_values) == 0) {
             return(NA_real_)
           }
           sumlog(p_values)$p
         }
         ),
-      
-      composite_p_val_stouffer = pmap_dbl(
-        .l = list(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue),
-        .f = function(p1, p2, p3, p4) {
-          p_values <- na.omit(c(p1, p2, p3, p4))
+      composite_p_val_stouffer = pmap_dbl( 
+        select(., matches("_PValue|P\\.Value|_pvalue")),
+        .f = function(...) {
+          args <- list(...)
+          p_values <- na.omit(unlist(args))
           if (length(p_values) == 0) {
             return(NA_real_)
           }
           metap::sumz(p_values)$p
         }
-      )
-    ) %>%  
+        )   
+    ) %>%   
     mutate( 
-      composite_p_val_fisher_adj = p.adjust(composite_p_val_fisher, method = "BH"),
-      composite_p_val_stouffer_adj = p.adjust(composite_p_val_stouffer, method = "BH")
-    ) 
-  
-  de_replicate[[replicate_id]] <- de_replicate_tmp
-  
-  rm(de_replicate_tmp)
+      composite_p_val_fisher_BH = p.adjust(composite_p_val_fisher, method = "BH"),
+      composite_p_val_stouffer_BH = p.adjust(composite_p_val_stouffer, method = "BH"),
+      composite_p_val_fisher_BY = p.adjust(composite_p_val_fisher, method = "BY"),
+      composite_p_val_stouffer_BY = p.adjust(composite_p_val_stouffer, method = "BY"),
+      composite_p_val_fisher_bonferroni = p.adjust(composite_p_val_fisher, method = "bonferroni"),
+      composite_p_val_stouffer_bonferroni = p.adjust(composite_p_val_stouffer, method = "bonferroni"),
+      composite_p_val_fisher_fdr = p.adjust(composite_p_val_fisher, method = "fdr"),
+      composite_p_val_stouffer_fdr = p.adjust(composite_p_val_stouffer, method = "fdr") 
+      )
 }
-
-de_replicate
-
-de_replicate[[3]] %>% filter(composite_p_val_fisher_adj <= 0.05 & composite_p_val_stouffer_adj <= 0.05)
 ```
 
+### For initial samples
 ```{r}
-de_all %>%
-  pivot_transcript() %>%
-  select(edgerQLT_PValue, edgerLR_PValue, voom_P.Value, DESeq2_pvalue, feature) %>%
-  ggpairs(1:4)
+de_norm <- compute_DE_genes(expr_list = expr_list, phase = "normal")
+comp_de_norm <- compute_composite_DE_results(de_norm)
+
+
+```
+### For backflush samples
+```{r}
+de_bflush <- compute_DE_genes(expr_list = expr_list, phase = "backflush")
+comp_de_bflush <- compute_composite_DE_results(de_bflush)
 ```
 
+Write table with all DE genes and their annotation
 ```{r}
-de_all %>% 
-  pivot_transcript() %>%
-  filter(edgerQLT_PValue <= 0.05 | edgerLR_PValue <= 0.05 | voom_P.Value <= 0.05 | DESeq2_pvalue <= 0.05) %>% 
-  as_tibble() %>% 
-  left_join(MAG_annotation %>% select(feature = X6, "function" = X8), by = c("feature"))
+comp_de_norm %>% 
+  filter(composite_p_val_fisher_fdr <= 0.05 & 
+           significant_proportion > 0.5 & 
+           combat_DESeq2_log2FoldChange >= abs(log2(2))) %>% 
+  select(feature, composite_p_val_fisher, composite_p_val_fisher_fdr, significant_proportion, raw_edgerQLT_logFC) %>% 
+  left_join(MAG_annotation, by = "feature") %>% 
+  bind_cols(phase = "initial") %>% 
+  select(feature, phase, everything()) %>% 
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/de_genes_2fc.txt")
   
+comp_de_bflush %>% 
+  filter(composite_p_val_fisher_fdr <= 0.05 & 
+           significant_proportion > 0.5 & 
+           combat_DESeq2_log2FoldChange >= abs(log2(2))) %>% 
+  select(feature, composite_p_val_fisher, composite_p_val_fisher_fdr, significant_proportion, raw_edgerQLT_logFC) %>% 
+  left_join(MAG_annotation, by = "feature") %>% 
+  bind_cols(phase = "backflush") %>% 
+  select(feature, phase, everything()) %>% 
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/de_genes_2fc.txt", append = T)
 ```
+
+## Topgenes!
 ```{r}
-de_all %>% 
-  pivot_transcript() %>%
-  filter(edgerQLT_FDR <= 0.05 & edgerLR_FDR <= 0.05 & voom_adj.P.Val <= 0.05 & DESeq2_padj <= 0.05) %>% 
-  as_tibble() %>% 
-  left_join(MAG_annotation, by = c("feature" = "X6"))
+#topgenes <- 
+  counts %>%  
+  as_SummarizedExperiment(.sample = sample, .transcript = feature, .abundance = counts) %>% 
+  pivot_transcript(.transcript = feature) #%>% 
+  arrange(composite_p_val_fisher) #%>%
+  head(10) %>%
+  pull(feature)
+
+de_bflush_all_list[[4]] %>%  
+  pivot_transcript(.transcript = .feature) %>%
+  mutate(significant = composite_p_val_fisher_fdr < 0.05 & abs(edgerQLT_logFC) >= log2(2)) %>% 
+  mutate(symbol = ifelse(feature %in% topgenes, as.character(feature), "")) %>% 
+  ggplot(aes(x = edgerLR_logFC, y = composite_p_val_fisher, label = symbol)) +
+  geom_point(aes(color = significant, size = significant, alpha = significant)) +
+  geom_text_repel() +
+  theme_minimal() +
+  scale_y_continuous(trans = "log10_reverse") +
+  scale_color_manual(values = c("black", "#e11f28")) +
+  scale_size_discrete(range = c(1, 2))
 ```

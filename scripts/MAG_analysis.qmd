@@ -1,6 +1,6 @@
 ---
 title: "Membrane cleaning MAG analysis"
-editor: visual
+editor: source
 ---
 
 ```{r}
