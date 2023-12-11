@@ -8,9 +8,6 @@ library(tidyverse)
 library(googlesheets4)
 ```
 
-```{r}
-user <- 
-```
 
 ## Read drep (Widb) table
 

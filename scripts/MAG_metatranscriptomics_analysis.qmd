@@ -2,11 +2,18 @@
 title: "MAG-level metatranscriptomics analysis"
 author: "Shaman Narayanasamy"
 editor: source
+fig-cap-location: bottom
+format:
+  pdf: default
+  html: default
+execute:
+  echo: false 
+  warning: false
+  message: false
 ---
-
-## Load libraries
-
-```{r warning=F}
+# Description
+This document was generated directly from a quarto markdown file that contains the code for the analysis. To view the code, please visit the membrane cleaning github repository or request it from the author of this file.
+```{r loading libraries, warning=F, message = F}
 # tidytranscriptomics-related packages
 library(tidybulk)
 library(tidySummarizedExperiment) # we'll load this below to show what it can do
@@ -23,11 +30,13 @@ library(ggrepel)
 library(GGally)
 library(tidyHeatmap)
 ```
+## Data 
+This analysis focuses on the MAG "TI2_MAGScoT_cleanbin_000096" which represents the Geobacter genus. We hereafter refer to this as "Geobacter MAG". For this analysis, we require the following information:
+- Raw counts of all features/transcripts
+- List and annotation of all transcripts that belong to Geobacter
+- Sample information table
 
-## Select MAG of interest
-This part isolates the transcripts from the MAGs of interest.
-
-```{r}
+```{r load_MAG_data}
 bakta2MAG_path <- '/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
 
 bakta2MAG <- sprintf('ssh iris "cat %s"', bakta2MAG_path ) %>%   
@@ -35,7 +44,7 @@ bakta2MAG <- sprintf('ssh iris "cat %s"', bakta2MAG_path ) %>%
   read_tsv(col_names = c("MAG_ID", "Bakta_ID"))
 ```
 
-```{r}
+```{r load_sample_information}
 sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
   mutate(sample_ID = paste(sample, lane, sep = '_'),
          lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
@@ -52,7 +61,7 @@ MAG_annotation <-
   select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9 )
 ```
 
-```{r}
+```{r select_features_from_MAG}
 Bakta_IDs_of_interest <- filter(bakta2MAG, MAG_ID %in% c(MAGs_of_interest)) %>% pull(Bakta_ID)
 
 counts <- 
@@ -73,10 +82,12 @@ counts <-
                           .transcript = feature,
                           .abundance = counts)
 ```
-## Preprocess the data
-
-### Convert to deseq2 object to perform housekeeping gene based scaling
-```{r}
+## Scaling and normalisation
+Scaling  and/or normalisation is typically carried out by individual differential expression (DE) analysis methods. However, this is not a standard transcriptomics analysis, rather an analysis of a pseudo-isolate (i.e. MAG) isolate analysis using metatranscrtipcomics data, hence we perform several strategies for normalising the data. These inlude:
+1. ComBat-seq normalisation based on batch effect correction
+2. Housekeeping gene (HKG) -based scaling
+3. Combination of all the above
+```{r create_DESeq2_object}
 dds <- DESeq2::DESeqDataSet(counts %>% as_tibble() %>% mutate(counts = as.integer(counts + 1),
                                                               condition = as.factor(condition),
                                                               phase = as.factor(phase),
@@ -87,8 +98,7 @@ dds <- DESeq2::DESeqDataSet(counts %>% as_tibble() %>% mutate(counts = as.intege
       design = ~ condition*phase + replicate + lane)
 ```
 
-### ComBat-seq scaling
-```{r}
+```{r compbat_seq_scaling, output = F}
 combat_counts <- 
   ComBat_seq(counts(dds), 
              batch = colnames(dds) %>% as_tibble() %>% rename(sample = value) %>% left_join(sample_info, by = c("sample" = "sample_ID")) %>% pull(replicate),
@@ -103,9 +113,9 @@ combat_counts <-
                           .sample = sample,
                           .transcript = feature)
 ```
-### Housekeeping gene scaling
-#### Assess the expression of housekeeping genes
-```{r}
+### Housekeeping gene (HKG) evaluation
+The genes in @tbl-hkg_list are considered housekeeping genes and are evaluated for their suitability to be used for scaling the data.
+```{r list_housekeeping_genes}
 housekeeping_genes <- c("gyrA",
                         "gyrB",
                         "recA",
@@ -114,11 +124,16 @@ housekeeping_genes <- c("gyrA",
                         "fusA",
                         "dnaK",
                         "groEL",
-                        "groES")
-
+                        "groES") 
 ```
-#### Inspect housekeeping genes across all samples/replicates
+
 ```{r}
+#| label: tbl-hkg_list
+#| tbl-cap: "List of housekeeping genes."
+housekeeping_genes %>% as_tibble() %>% rename(`housekeeping_gene_symbol` = value) %>% knitr::kable()
+```
+```{r show_hkg_information}
+#| label: tbl-hkg_genes_count
 MAG_annotation %>% 
   filter(gene_symbol %in% housekeeping_genes) %>% 
   left_join(counts %>% as_tibble(), by = "feature") %>% 
@@ -134,11 +149,42 @@ MAG_annotation %>%
     cv = sd_count / mean_count
   ) %>%
   arrange(cv) %>% 
-  left_join(MAG_annotation)
+  left_join(MAG_annotation) %>% 
+  select(gene_symbol, mean = mean_count, sd = sd_count, cv, `function` = gene_function) %>% 
+  knitr::kable(digits = 2, caption = "List of genes that could be used for houskeeping gene based normalisation. The mean and standard deviation (sd) are based on the raw read counts and the coefficient of variation (cv) represents the variation of these genes accross all samples and replicates. Lower cv represents less variation. Genes with the least variation should used as references in housekeeping gene normalisation.")
 ```
 
-#### Inspect housekeeping genes within replicates
-```{r message=F, warning=F}
+```{r visualise_hkg_condition}
+#| fig-cap: "Expression of housekeeping genes within conditions based on raw counts."
+#| label: fig-hkg_expression_conditions
+
+MAG_annotation %>% 
+  filter(gene_symbol %in% housekeeping_genes) %>% 
+  left_join(counts %>% as_tibble(), by = "feature") %>% 
+  # make faceted stripchart
+  ggplot(aes(x = condition, y = counts + 1, fill = condition, group = condition)) +
+  geom_boxplot() +
+  geom_jitter() +
+  facet_wrap(~gene_symbol) +
+  scale_y_log10() +
+  theme_minimal()
+```
+```{r visualise_hkg_replicate}
+#| fig-cap: "Expression of housekeeping genes within replicates based on raw counts."
+#| label: fig-hkg_expression_replicates
+MAG_annotation %>% 
+  filter(gene_symbol %in% housekeeping_genes) %>% 
+  left_join(counts %>% as_tibble(), by = "feature") %>% 
+  mutate(replicate = as.character(replicate)) %>% 
+  # make faceted stripchart
+  ggplot(aes(x = replicate, y = counts + 1, fill = replicate, group = replicate)) +
+  geom_boxplot() +
+  geom_jitter() +
+  facet_wrap(~gene_symbol) +
+  scale_y_log10() +
+  theme_minimal()
+```
+```{r hkg_replicate_tables, message=F, warning=F, eval = F}
 housekeeping_replicates <- list()
 for (replicate_id in unique(sample_info$replicate)) {
  
@@ -162,11 +208,9 @@ for (replicate_id in unique(sample_info$replicate)) {
      left_join(MAG_annotation)
    
 }
-
-housekeeping_replicates
 ```
-In general, there is high variability between the housekeeping genes. Therefore, we select 'dnaK', which shows the lowest variation in most replicates.
-```{r}
+
+```{r hkg_selection}
 hkg_vector <- rownames(dds) %in% "CLCDCC_00215" 
 dds_hkg <- DESeq2::estimateSizeFactors(dds, controlGenes = hkg_vector)
 
@@ -181,9 +225,8 @@ hkg_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(rownames
                           .transcript = feature)
 ```
 
-### ComBat-seq and housekeeping normalisation
-#### Inspect housekeeping genes across all samples/replicates
-```{r}
+```{r hkg_combat}
+#| label: tbl-hkg_genes_combat
 MAG_annotation %>% 
   filter(gene_symbol %in% housekeeping_genes) %>% 
   left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
@@ -199,11 +242,13 @@ MAG_annotation %>%
     cv = sd_count / mean_count
   ) %>%
   arrange(cv) %>% 
-  left_join(MAG_annotation)
+  left_join(MAG_annotation) %>% 
+  select(gene_symbol, mean = mean_count, sd = sd_count, cv, `function` = gene_function) %>% 
+  knitr::kable(digits = 2, caption = "List of genes that could be used for houskeeping gene based normalisation. The mean and standard deviation (sd) are based on the raw read counts and the coefficient of variation (cv) represents the variation of these genes accross all samples and replicates. Lower cv represents less variation. Genes with the least variation should used as references in housekeeping gene normalisation.")
 ```
-In general, the combat-seq normalisation reduced the amount of overall variation accross all samples/replicates.
+
 #### Inspect housekeeping genes within each replicate
-```{r message=F, warning=F}
+```{r hkg_replicates, message=F, warning=F}
 housekeeping_replicates <- list()
 
 for (replicate_id in unique(sample_info$replicate)) {
@@ -226,11 +271,9 @@ for (replicate_id in unique(sample_info$replicate)) {
      arrange(cv) %>% 
      left_join(MAG_annotation)
 }
-
-housekeeping_replicates
 ```
 ```{r}
-hkg_vector <- rownames(dds) %in% c("CLCDCC_00215", "CLCDCC_10560")
+hkg_vector <- rownames(dds) %in% "CLCDCC_00215"
 dds_hkg <- DESeq2::estimateSizeFactors(dds, controlGenes = hkg_vector)
 
 ## Convert back again to tidybulk experimental object to ensure downstream compatibility
@@ -243,9 +286,21 @@ hkg_combat_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(r
                           .sample = sample,
                           .transcript = feature)
 ```
-## Visualise data
-Produce visualisations of different normalisations
-```{r}
+In general, there is a high variability for the all the housekeeping genes (HKG)
+that we evaluated, either based on condition (@fig-hkg_expression_conditions)
+and replicate (@fig-hkg_expression_replicates) -level expression, which may not
+make them suitable to be used as a reference for scaling. @tbl-hkg_genes_count
+summarises the variability of HKGs across all samples. However, if we must make
+a choice, 'dnaK', would be selected as the reference HKG as it shows the lowest
+coefficient of variation (cv). Equivalent evaluation was conducted for
+ComBat-seq normalised data (@tbl-hkg_genes_combat) reveals that the ComBat batch
+correction procedure significantly reduced the variability between housekeeping
+genes. Similarly, 'dnaK' once again appeared as the least variable genes. Based
+on this, the normalisation of housekeeping genes for both raw counts and
+ComBat-seq normalised data will use 'dnaK' as the HKG for scaling.
+
+## Evaluation of data
+```{r initiate_plot_lists}
 # Initiate lists
 ## List of PCA plots
 p.pca <- list() 
@@ -262,9 +317,7 @@ p.dp <- list()
 ## List of density plots
 p.hm <- list()
 ```
-### Raw counts
-#### PCA
-```{r}
+```{r pca_raw_counts}
 p.pca[[1]] <- 
   counts %>%
   reduce_dimensions(method = "PCA") %>% 
@@ -274,8 +327,7 @@ p.pca[[1]] <-
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
-#### MDS
-```{r}
+```{r mds_raw_counts}
 p.mds[[1]] <- 
   counts %>%
   reduce_dimensions(method = "MDS") %>% 
@@ -285,15 +337,13 @@ p.mds[[1]] <-
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
-#### Boxplot
-```{r}
+```{r boxplot_raw_counts}
 p.bp[[1]] <-  
   counts %>% as_tibble() %>%  
   ggplot(aes(x = .sample, y = log(counts), fill = as.character(replicate))) +
   geom_boxplot() 
 ```
-#### Density plot
-```{r}
+```{r density_raw_counts}
 p.dp[[1]] <-   
   counts %>% as_tibble() %>%  
   ggplot(aes(x=counts, color=as.character(.sample))) + 
@@ -302,8 +352,7 @@ p.dp[[1]] <-
   theme_minimal()
 ```
 
-#### Heatmap
-```{r}
+```{r heatmap_raw_counts}
 p.hm[[1]] <- 
   counts %>% 
   keep_abundant(minimum_counts = 1) %>% 
@@ -327,9 +376,7 @@ p.hm[[1]] <-
   add_tile(lane)
 ```
 
-### ComBat-seq counts
-#### PCA
-```{r}
+```{r pca_combat}
 p.pca[[2]] <- 
   combat_counts %>%
   reduce_dimensions(method = "PCA") %>% 
@@ -340,8 +387,7 @@ p.pca[[2]] <-
   theme_minimal()
 ```
 
-#### MDS
-```{r}
+```{r mds_combat}
 p.mds[[2]] <-  
   combat_counts %>%
   reduce_dimensions(method = "MDS") %>% 
@@ -352,15 +398,13 @@ p.mds[[2]] <-
   theme_minimal()
 ```
 
-#### Boxplot
-```{r}
+```{r boxplot_combat}
 p.bp[[2]] <- 
   combat_counts %>% as_tibble() %>% 
   ggplot(aes(x = sample, y = log(counts), fill = as.character(replicate))) + 
   geom_boxplot() 
 ```
-#### Density plot
-```{r}
+```{r density_plot_combat}
 p.dp[[2]] <- 
   combat_counts %>% as_tibble() %>%  
   ggplot(aes(x=counts, color=as.character(.sample))) +
@@ -368,8 +412,7 @@ p.dp[[2]] <-
   scale_x_log10() +
   theme_minimal()
 ```
-#### Heatmap
-```{r}
+```{r heatmap_combat}
 p.hm[[2]] <- 
   combat_counts %>% 
   keep_abundant(minimum_counts = 1) %>% 
@@ -393,9 +436,7 @@ p.hm[[2]] <-
   add_tile(lane)
 ```
 
-### Housekeeping genes normalised counts
-#### PCA
-```{r}
+```{r pca_hkg}
 p.pca[[3]] <- 
   hkg_counts %>%
   reduce_dimensions(method = "PCA") %>% 
@@ -405,8 +446,7 @@ p.pca[[3]] <-
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
-#### MDS
-```{r}
+```{r mds_hkg}
 p.mds[[3]] <- 
   hkg_counts %>%
   reduce_dimensions(method = "MDS") %>% 
@@ -416,15 +456,13 @@ p.mds[[3]] <-
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
-#### Boxplot
-```{r}
+```{r boxplot_hkg}
 p.bp[[3]] <- 
   hkg_counts %>% as_tibble() %>%   
   ggplot(aes(x = .sample, y = log(counts), fill = as.character(replicate))) +
   geom_boxplot() 
 ```
-#### Density plot
-```{r}
+```{r density_plot_hkg}
 p.dp[[3]] <-  
   hkg_counts %>% as_tibble() %>%  
   ggplot(aes(x=counts, color=as.character(.sample))) +
@@ -432,8 +470,7 @@ p.dp[[3]] <-
   scale_x_log10() + 
   theme_minimal()
 ```
-#### Heatmap
-```{r}
+```{r heatmap_hkg}
 p.hm[[3]] <- 
   hkg_counts %>% 
   keep_abundant(minimum_counts = 1) %>% 
@@ -455,9 +492,7 @@ p.hm[[3]] <-
   add_tile(replicate) %>% 
   add_tile(lane)
 ```
-### ComBat-seq and housekeeping gene normalisation
-#### PCA
-```{r}
+```{r pca_combat_hkg}
 p.pca[[4]] <- 
   hkg_combat_counts %>%
   reduce_dimensions(method = "PCA") %>% 
@@ -467,8 +502,7 @@ p.pca[[4]] <-
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
-#### MDS
-```{r}
+```{r mds_combat_hkg}
 p.mds[[4]] <- 
   hkg_combat_counts %>%
   reduce_dimensions(method = "MDS") %>% 
@@ -478,15 +512,13 @@ p.mds[[4]] <-
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
 ```
-#### Boxplot
-```{r}
+```{r boxplot_combat_hkg}
 p.bp[[4]] <- 
   hkg_combat_counts %>% as_tibble() %>%  
   ggplot(aes(x = .sample, y = log(counts), fill = as.character(replicate))) +
   geom_boxplot() 
 ```
-#### Density plot
-```{r}
+```{r density_plot_combat_hkg}
 p.dp[[4]] <- 
   hkg_combat_counts %>% as_tibble() %>%  
   ggplot(aes(x=counts, color=as.character(.sample))) + 
@@ -494,8 +526,7 @@ p.dp[[4]] <-
   scale_x_log10() + 
   theme_minimal()
 ```
-#### Heatmap
-```{r}
+```{r heatmap_combat_hkg}
 p.hm[[4]] <- 
   hkg_combat_counts %>% 
   keep_abundant(minimum_counts = 1) %>% 
@@ -518,14 +549,35 @@ p.hm[[4]] <-
   add_tile(lane)
 ```
 
-### Combine plots
-```{r}
-p.pca[[1]] + p.pca[[2]] + p.pca[[3]] + p.pca[[4]] + plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "bottom")
+```{r plot_pca}
+#| label: fig-pca
+#| fig-cap: "Visualisation of principal component analysis (PCA) dimensionality reduction of unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
+#| fig-subcap:
+#|   - "Raw counts"
+#|   - "ComBat-seq" 
+#|   - "HKG" 
+#|   - "ComBat-seq + HKG" 
+#| layout-ncol: 2
+p.pca[[1]] 
+p.pca[[2]] 
+p.pca[[3]] 
+p.pca[[4]] 
 ```
-```{r}
-p.mds[[1]] + p.mds[[2]] + p.mds[[3]] + p.mds[[4]] + plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "bottom")
+```{r plot_mds}
+#| label: fig-mds
+#| fig-cap: "Visualisation of multi-dimensional scaling (MDS) dimensionality reduction of unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
+#| fig-subcap:
+#|   - "Raw counts"
+#|   - "ComBat-seq" 
+#|   - "HKG" 
+#|   - "ComBat-seq + HKG" 
+#| layout-ncol: 2
+p.mds[[1]] 
+p.mds[[2]] 
+p.mds[[3]] 
+p.mds[[4]] 
 ```
-```{r}
+```{r generate_boxplot}
 for (i in 1:length(p.bp)){
   if (i <= 3){
     p.bp[[i]] <- 
@@ -541,29 +593,110 @@ for (i in 1:length(p.bp)){
        )
   }
 }
-  
-p.bp[[1]] + p.bp[[2]] + p.bp[[3]] + p.bp[[4]] + plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "bottom")
 ```
-```{r}
-p.dp[[1]] + p.dp[[2]] + p.dp[[3]] + p.dp[[4]] + plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "left")
+```{r plot_boxplots}
+#| label: fig-boxplot
+#| fig-cap: "Boxplots of unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
+#| fig-subcap:
+#|   - "Raw counts"
+#|   - "ComBat-seq" 
+#|   - "HKG" 
+#|   - "ComBat-seq + HKG" 
+#| layout-ncol: 1
+#| fig-height: 2
+
+p.bp[[1]] 
+p.bp[[2]] 
+p.bp[[3]] 
+p.bp[[4]] 
+```
+
+```{r plot_density_plots}
+#| label: fig-density_plot
+#| fig-cap: "Density plots of unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
+#| fig-subcap:
+#|   - "Raw counts"
+#|   - "ComBat-seq" 
+#|   - "HKG" 
+#|   - "ComBat-seq + HKG" 
+#| layout-ncol: 2
+p.dp[[1]] 
+p.dp[[2]] 
+p.dp[[3]] 
+p.dp[[4]] 
 ```
 
 ```{r}
-ht_list <- p.hm[[1]] + p.hm[[2]] #+ p.hm[[3]] + p.hm[[4]] + plot_layout()
-  #plot_layout(guides = "collect", ncol = 1) & theme(legend.position = "left")
-
-yes <- p.hm[[1]]
-no <- p.hm[[2]]
-
+#| label: fig-heatmap
+#| fig-cap: "Heatmap of topm variable genes in the unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
+#| fig-subcap:
+#|   - "Raw counts"
+#|   - "ComBat-seq" 
+#|   - "HKG" 
+#|   - "ComBat-seq + HKG" 
+#| layout-ncol: 2
+#| fig-height: 8
+p.hm[[1]] 
+p.hm[[2]] 
+p.hm[[3]] 
+p.hm[[4]] 
 ```
+
+Dimensionality reduction using principal component analysis (PCA; @fig-pca) and
+multi-dimensional scaling (MDS; @fig-mds) show that there is no clustering
+solely based on replicate number in the raw counts and in the scaled/normalised
+data. It can be observed that the housekeeping gene (HKG) -based scaling creates
+the most effect when applied to the raw and ComBat-seq normalised counts. It
+must be noted that this pattern is *not* observed when performing the same
+analysis of the entire transcriptome (i.e. not just isolating Geobacter
+transcripts).
+
+The boxplots (@fig-boxplot) display the effect of the various normalisation and
+scaling procedures applied to the raw counts. The density plots
+(@fig-density_plot) indicates that the scaling using HKG drastically changes the
+distribution of the data, such that the multi-modal nature of the data is
+further amplified.
+
 ## Differential expression analysis
-Store all the different expression matrices within a list. The weird distributions for the housekeeping gene normalised sampels cause issues in the downstream analyses. The reason for this is unknown. Hence, we exclude any housekeeping gene -based results.
-```{r}
-expr_list <- list("raw" = counts, "combat" = combat_counts, "hkg" = hkg_counts, "combat_hkg" = hkg_combat_counts)
+Differential expression (DE) analysis is separated into initial and backflush flow to
+delineate the differentially expressed genes stemming from each part of the
+experiment. Transcripts that have a count of at least one read in at least 70%
+of the samples are considered sufficiently abundant for downstream DE analysis.
+The model applied for DE tests is `~condition + replicate + lane`. Specifically,
+we compute the contrast between the true biological conditions of interest (i.e.
+treatment vs control) while "removing" technical differences `replicate` and
+`lane` from the model, also known as (modelling out). DE is performed using four
+different methods: 
+1. EdgeR using quasi-likelihood tests (QLT) 
+2. EdgeR using likelihood ratio (LR) tests 
+3. limma-voom
+4. DESeq2
 
-names(expr_list)[1]
+Each of these methods are applied to the raw counts and the three different
+normalisation/scaling methods, i.e. i) ComBat-seq, ii) HKG and iii) ComBat-seq + HKG.
+This results in a total of 16 different DE results. 
+
+The DE results were consolidated based on the following criteria: 
+1. Identified as differentially expressed in at least one combination of data
+normalisation (e.g. raw, ComBat, HKG, etc.) and DE analysis method (i.e.
+EdgeR-QLT, DESeq2). This results in up to a total of 16 combinations
+2. Count the number of DE tests that were performed on the transcript out of the possible 16, i.e. non-NA values
+3. Count the number of DE tests in which the p-value \leq 0.05 from those identified in 2. (above)
+4. Compute a composite p-value using Fisher and Stouffer test based on the p-values from all the different DE analysis (and their combinations, thereof)
+5. Correct the composite p-values using multiple methods (i.e. Benjamini-Hochberg, Benjamini-Yukateli, Bonferroni, false discovery rate; FDR)
+
+A transcript that is significantly differentially expressed based on the following criteria:
+1. Significant (i.e. p-value \leq 0.05) in at least 50% of the DE analysis which contained p-values (i.e. non-NA)
+2. Composite Fisher test FDR \leq 0.05
+3. Consistent expression directionality (i.e. up/down) accross all the different tests (i.e. log fold-change)
+4. Absolute fold-chage of 2
+
+
+
+```{r define_expression_object_list}
+expr_list <- list("raw" = counts, "combat" = combat_counts, "hkg" = hkg_counts, "combat_hkg" = hkg_combat_counts)
 ```
-```{r}
+```{r function_de}
 ## Function: Perform all DE analysis methods on given tables/normalisations including different phases
 compute_DE_genes <- function(expr_list, phase_value = "normal"){ 
   
@@ -661,7 +794,7 @@ compute_DE_genes <- function(expr_list, phase_value = "normal"){
   }
 ```
 
-```{r}
+```{r function_expression_consistency}
 # Function: Define consistency of directionality
 all_same_direction <- function(values) {
   non_na_values <- na.omit(values)
@@ -669,7 +802,7 @@ all_same_direction <- function(values) {
 }
 ```
 
-```{r}
+```{r function_compute_compostite_scores}
 ## Function: Compute composite DE scores such as proportion of significant p-values and composite p-values and adjusted p-values
 compute_composite_DE_results <- function(de_res){ 
   # List p-value columns
@@ -733,20 +866,15 @@ compute_composite_DE_results <- function(de_res){
 }
 ```
 
-### For initial samples
 ```{r}
 de_norm <- compute_DE_genes(expr_list = expr_list, phase = "normal")
 comp_de_norm <- compute_composite_DE_results(de_norm)
-
-
 ```
-### For backflush samples
 ```{r}
 de_bflush <- compute_DE_genes(expr_list = expr_list, phase = "backflush")
 comp_de_bflush <- compute_composite_DE_results(de_bflush)
 ```
 
-Write table with all DE genes and their annotation
 ```{r}
 comp_de_norm %>% 
   filter(composite_p_val_fisher_fdr <= 0.05 & 
@@ -756,7 +884,7 @@ comp_de_norm %>%
   left_join(MAG_annotation, by = "feature") %>% 
   bind_cols(phase = "initial") %>% 
   select(feature, phase, everything()) %>% 
-  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/de_genes_2fc.txt")
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-2FC_0.05FDR.tsv")
   
 comp_de_bflush %>% 
   filter(composite_p_val_fisher_fdr <= 0.05 & 
@@ -766,28 +894,92 @@ comp_de_bflush %>%
   left_join(MAG_annotation, by = "feature") %>% 
   bind_cols(phase = "backflush") %>% 
   select(feature, phase, everything()) %>% 
-  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/de_genes_2fc.txt", append = T)
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-2FC_0.05FDR.tsv", append = T)
 ```
 
-## Topgenes!
-```{r}
-#topgenes <- 
-  counts %>%  
-  as_SummarizedExperiment(.sample = sample, .transcript = feature, .abundance = counts) %>% 
-  pivot_transcript(.transcript = feature) #%>% 
-  arrange(composite_p_val_fisher) #%>%
+```{r get_top_genes}
+topgenes_norm <- 
+  comp_de_norm %>% 
+  arrange(composite_p_val_fisher) %>%
   head(10) %>%
-  pull(feature)
+  pull(feature) 
 
-de_bflush_all_list[[4]] %>%  
+topgenes_bflush <- 
+  comp_de_bflush %>% 
+  arrange(composite_p_val_fisher) %>%
+  head(10) %>%
+  pull(feature) 
+```
+
+```{r volcano_plot}
+#| label: fig-volcano
+#| fig-cap: "Volcano plot of differentially expressed genes. P-values are based on the composite Fischer p-value and fold-changes are based on raw counts edgeR quasi-likelihood test computation." 
+#| fig-subcap:
+#|   - "Initial flow"
+#|   - "Backflush" 
+#| layout-ncol: 1
+counts %>%  
+  full_join(comp_de_norm %>% select(feature, contains("raw_"), composite_p_val_fisher, composite_p_val_fisher_fdr), by = "feature") %>% 
+  mutate(log10_composite_p_val_fisher = log10(composite_p_val_fisher)) %>% 
   pivot_transcript(.transcript = .feature) %>%
-  mutate(significant = composite_p_val_fisher_fdr < 0.05 & abs(edgerQLT_logFC) >= log2(2)) %>% 
-  mutate(symbol = ifelse(feature %in% topgenes, as.character(feature), "")) %>% 
-  ggplot(aes(x = edgerLR_logFC, y = composite_p_val_fisher, label = symbol)) +
-  geom_point(aes(color = significant, size = significant, alpha = significant)) +
+  filter(!is.na(raw_edgerQLT_logFC)) %>% 
+  mutate(significant = composite_p_val_fisher_fdr <= 0.05 & abs(raw_edgerQLT_logFC) >= log2(2)) %>% 
+  mutate(symbol = ifelse(.feature %in% topgenes_norm, as.character(.feature), "")) %>% 
+  ggplot(aes(x = raw_edgerQLT_logFC, y = -log10_composite_p_val_fisher, label = symbol)) +
+  geom_point(aes(color = significant, size = significant)) +
   geom_text_repel() +
   theme_minimal() +
-  scale_y_continuous(trans = "log10_reverse") +
   scale_color_manual(values = c("black", "#e11f28")) +
   scale_size_discrete(range = c(1, 2))
+
+counts %>%  
+  full_join(comp_de_bflush %>% select(feature, contains("raw_"), composite_p_val_fisher, composite_p_val_fisher_fdr), by = "feature") %>% 
+  mutate(log10_composite_p_val_fisher = log10(composite_p_val_fisher)) %>% 
+  pivot_transcript(.transcript = .feature) %>%
+  filter(!is.na(raw_edgerQLT_logFC)) %>% 
+  mutate(significant = composite_p_val_fisher_fdr <= 0.05 & abs(raw_edgerQLT_logFC) >= log2(2)) %>% 
+  mutate(symbol = ifelse(.feature %in% topgenes_norm, as.character(.feature), "")) %>% 
+  ggplot(aes(x = raw_edgerQLT_logFC, y = -log10_composite_p_val_fisher, label = symbol)) +
+  geom_point(aes(color = significant, size = significant)) +
+  geom_text_repel() +
+  theme_minimal() +
+  scale_color_manual(values = c("black", "#e11f28")) +
+  scale_size_discrete(range = c(1, 2))
+
+```
+
+
+```{r visualise_stripchart}
+#| label: fig-topgenes
+#| fig-cap: "Stripchart of the most significantly expressed genes." 
+#| fig-subcap:
+#|   - "Initial flow"
+#|   - "Backflush" 
+#| layout-ncol: 1
+
+counts %>%
+
+  # extract counts for top differentially expressed genes
+  filter(feature %in% topgenes_norm) %>%
+
+  # make faceted stripchart
+  ggplot(aes(x = condition, y = counts + 1, fill = condition, group = condition)) +
+  geom_boxplot() +
+  geom_jitter() +
+  facet_wrap(~feature) +
+  scale_y_log10() +
+  theme_minimal()
+
+counts %>%
+
+  # extract counts for top differentially expressed genes
+  filter(feature %in% topgenes_bflush) %>%
+
+  # make faceted stripchart
+  ggplot(aes(x = condition, y = counts + 1, fill = condition, group = condition)) +
+  geom_boxplot() +
+  geom_jitter() +
+  facet_wrap(~feature) +
+  scale_y_log10() +
+  theme_minimal()
 ```
