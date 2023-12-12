@@ -22,6 +22,7 @@ This document is generated from a quarto markdown file that contains the code fo
 
 ## Data
 The following information is required for this analysis:
+
 - `dRep` results, which includes completeness/contamination metrics from checkM
 - `CAT/BAT` taxonomic classification output
 - Gene annotations from `Bakta` to link transcripts to MAGs

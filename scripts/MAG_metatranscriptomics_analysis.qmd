@@ -32,9 +32,12 @@ library(tidyHeatmap)
 ```
 ## Data 
 This analysis focuses on the MAG "TI2_MAGScoT_cleanbin_000096" which represents the Geobacter genus. We hereafter refer to this as "Geobacter MAG". For this analysis, we require the following information:
+
 - Raw counts of all features/transcripts
 - List and annotation of all transcripts that belong to Geobacter
 - Sample information table
+
+
 
 ```{r load_MAG_data}
 bakta2MAG_path <- '/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
@@ -81,10 +84,17 @@ counts <-
                           .abundance = counts)
 ```
 ## Scaling and normalisation
-Scaling  and/or normalisation is typically carried out by individual differential expression (DE) analysis methods. However, this is not a standard transcriptomics analysis, rather an analysis of a pseudo-isolate (i.e. MAG) isolate analysis using metatranscrtipcomics data, hence we perform several strategies for normalising the data. These inlude:
+Scaling  and/or normalisation is typically carried out by individual
+differential expression (DE) analysis methods. However, this is not a standard
+transcriptomics analysis, rather an analysis of a pseudo-isolate (i.e. MAG)
+isolate analysis using metatranscrtipcomics data, hence we perform several
+strategies for normalising the data. These inlude:
+
 1. ComBat-seq normalisation based on batch effect correction
 2. Housekeeping gene (HKG) -based scaling
 3. Combination of all the above
+
+
 ```{r create_DESeq2_object}
 dds <- DESeq2::DESeqDataSet(counts %>% as_tibble() %>% mutate(counts = as.integer(counts + 1),
                                                               condition = as.factor(condition),
@@ -665,6 +675,7 @@ we compute the contrast between the true biological conditions of interest (i.e.
 treatment vs control) while "removing" technical differences `replicate` and
 `lane` from the model, also known as (modelling out). DE is performed using four
 different methods: 
+
 1. EdgeR using quasi-likelihood tests (QLT) 
 2. EdgeR using likelihood ratio (LR) tests 
 3. limma-voom
@@ -675,6 +686,7 @@ normalisation/scaling methods, i.e. i) ComBat-seq, ii) HKG and iii) ComBat-seq +
 This results in a total of 16 different DE results. 
 
 The DE results were consolidated based on the following criteria: 
+
 1. Identified as differentially expressed in at least one combination of data
 normalisation (e.g. raw, ComBat, HKG, etc.) and DE analysis method (i.e.
 EdgeR-QLT, DESeq2). This results in up to a total of 16 combinations
@@ -684,6 +696,7 @@ EdgeR-QLT, DESeq2). This results in up to a total of 16 combinations
 5. Correct the composite p-values using multiple methods (i.e. Benjamini-Hochberg, Benjamini-Yukateli, Bonferroni, false discovery rate; FDR)
 
 A transcript that is significantly differentially expressed based on the following criteria:
+
 1. Significant (i.e. p-value \leq 0.05) in at least 50% of the DE analysis which contained p-values (i.e. non-NA)
 2. Composite Fisher test FDR \leq 0.05
 3. Consistent expression directionality (i.e. up/down) accross all the different tests (i.e. log fold-change)
