@@ -50,12 +50,10 @@ sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cle
          lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
   select(sample_ID, everything(), -sample, -R1, -R2) 
 
-MAGs_of_interest <- c("TI2_MAGScoT_cleanbin_000096") 
-
 annotation_folder <- '/scratch/users/snarayanasamy/membrane_cleaning/output/annotation/all/bakta/'
 
 MAG_annotation <- 
-  sprintf('ssh iris "cat %s"', paste(annotation_folder, MAGs_of_interest, paste0(MAGs_of_interest, ".tsv"), sep = '/')) %>%  
+  sprintf('ssh iris "cat %s"', paste(annotation_folder, "*", paste0("*", ".tsv"), sep = '/')) %>%  
   pipe() %>%   
   read_tsv(comment = "#", col_names = F) %>% 
   select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9 )
@@ -691,6 +689,8 @@ A transcript that is significantly differentially expressed based on the followi
 3. Consistent expression directionality (i.e. up/down) accross all the different tests (i.e. log fold-change)
 4. Absolute fold-chage of 2
 
+@fig-volcano shows an overview of the expressed genes, while @fig-topgenes
+visualises the expression of the most significant genes.
 
 
 ```{r define_expression_object_list}
@@ -874,8 +874,12 @@ comp_de_norm <- compute_composite_DE_results(de_norm)
 de_bflush <- compute_DE_genes(expr_list = expr_list, phase = "backflush")
 comp_de_bflush <- compute_composite_DE_results(de_bflush)
 ```
+```{r write_full_table, eval = F}
+write_tsv(comp_de_norm, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_initial.tsv")
+write_tsv(comp_de_bflush, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_backflush.tsv")
 
-```{r}
+```
+```{r write_topgenes_table, eval = F}
 comp_de_norm %>% 
   filter(composite_p_val_fisher_fdr <= 0.05 & 
            significant_proportion > 0.5 & 
@@ -884,7 +888,7 @@ comp_de_norm %>%
   left_join(MAG_annotation, by = "feature") %>% 
   bind_cols(phase = "initial") %>% 
   select(feature, phase, everything()) %>% 
-  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-2FC_0.05FDR.tsv")
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-2FC_0.05FDR_withAnnotation.tsv")
   
 comp_de_bflush %>% 
   filter(composite_p_val_fisher_fdr <= 0.05 & 
@@ -894,7 +898,7 @@ comp_de_bflush %>%
   left_join(MAG_annotation, by = "feature") %>% 
   bind_cols(phase = "backflush") %>% 
   select(feature, phase, everything()) %>% 
-  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-2FC_0.05FDR.tsv", append = T)
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-2FC_0.05FDR_withAnnotation.tsv", append = T)
 ```
 
 ```{r get_top_genes}

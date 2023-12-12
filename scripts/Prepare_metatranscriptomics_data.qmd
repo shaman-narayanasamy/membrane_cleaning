@@ -3,13 +3,18 @@ title: "Prepare metatranscriptomics data"
 author: "Shaman Narayanasamy"
 editor: source
 ---
-This script compiles the data before performing analyses.
 
-## Read quantification information from HPC
-```{r eval=FALSE}
-quant_folder <-
+```{r load_packages}
+library(tidyverse)
+library(rlang)
+```
+
+This script compiles the data before performing analyses.
+## Metatranscriptomics
+```{r read_sample_info}
+ quant_folder <-
   '/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification/salmon/all'
-  
+ 
 sample_table <- 
   sprintf('ssh iris "ls %s"', quant_folder) %>% pipe() %>% 
   read_tsv(col_names = "folder") %>% 
@@ -17,8 +22,12 @@ sample_table <-
   select(folder, sample, lane)
 ```
 
-### Compile raw counts
+#### Compile raw counts
 ```{r eval=FALSE}
+## Define HPC folder containing all the count information
+quant_folder <-
+  '/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification/salmon/all'
+
 ## Raw counts
 for (f in 1:nrow(sample_table)){
   sample_folder <- sample_table$folder[f] 
@@ -50,7 +59,7 @@ counts <-
 rm(tmp)
 ```
 
-### Compile transcripts per million (TPM) normalised counts
+#### Compile transcripts per million (TPM) normalised counts
 ```{r eval=FALSE}
 ## Transcripts per million (TPM) counts
 for (f in 1:nrow(sample_table)){
@@ -75,11 +84,112 @@ for (f in 1:nrow(sample_table)){
   }
 }
 
-tpm_counts <-
+mt_tpm <-
   tmp %>% 
   separate(Name, into = c("Bakta_ID"), sep = '_', remove = F, extra = "drop") %>% 
   write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_TPM_counts.tsv")
 
 rm(tmp)
-
 ```
+
+## Metagenomics
+```{r eval=FALSE}
+## Define the folder containing count data within the HPC
+quant_folder <-
+  '/scratch/users/snarayanasamy/membrane_cleaning/output/metagenomics/quantification/salmon/all'
+
+sample_table <- 
+  sprintf('ssh iris "ls %s"', quant_folder) %>% pipe() %>% 
+  read_tsv(col_names = "folder") %>% 
+  separate(folder, into = c("sample", "lane", "tmp"), sep = '_', remove = F) %>% 
+  select(folder, sample, lane)
+
+
+## Raw counts
+for (f in 1:nrow(sample_table)){
+  sample_folder <- sample_table$folder[f] 
+  sample_name <- sample_table$folder[f] %>% str_remove("_quant")
+  print(sample_table$folder[f])
+
+  if (f == 1) { 
+    tmp <- 
+      sprintf('ssh iris "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>% 
+      pipe() %>%  
+      read_tsv() %>% 
+      select(Name, Length, EffectiveLength, !!sample_name := NumReads)
+  }
+  else {
+      tmp <- 
+        sprintf('ssh iris "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>%  
+        pipe() %>%   
+        read_tsv() %>%   
+        select(Name, !!sample_name := NumReads) %>%  
+        full_join(tmp, ., by = "Name")
+  }
+}
+
+tmp %>%  
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_contig_counts.tsv")
+
+mg_counts <-
+  tmp %>%  
+  separate(Name, into = c("MAG_ID"), sep = '_c_', remove = T, extra = "drop") %>%  
+  pivot_longer(cols = c(sample_table %>% pull(sample)),
+                 names_to = "sample_ID",
+                 values_to = "count") %>% 
+  group_by(MAG_ID, sample_ID) %>% 
+  summarise(count = sum(count)) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = MAG_ID, 
+              names_from = sample_ID, 
+              values_from = count) %>% 
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_MAG_counts.tsv")
+
+rm(tmp)
+```
+
+#### Compile transcripts per million (TPM) normalised counts
+```{r eval=FALSE}
+## Transcripts per million (TPM) counts
+for (f in 1:nrow(sample_table)){
+  sample_folder <- sample_table$folder[f] 
+  sample_name <- sample_table$folder[f] %>% str_remove("_quant")
+  print(sample_table$folder[f])
+
+  if (f == 1) { 
+    tmp <- 
+      sprintf('ssh iris "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>% 
+      pipe() %>%  
+      read_tsv() %>% 
+      select(Name, Length, EffectiveLength, !!sample_name := TPM)
+  }
+  else {
+      tmp <- 
+        sprintf('ssh iris "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>%  
+        pipe() %>%   
+        read_tsv() %>%   
+        select(Name, !!sample_name := TPM) %>%  
+        full_join(tmp, ., by = "Name")
+  }
+}
+
+tmp %>%  
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_contig_TPM_counts.tsv")
+
+mg_tpm <-
+  tmp %>%  
+  separate(Name, into = c("MAG_ID"), sep = '_c_', remove = T, extra = "drop") %>%  
+  pivot_longer(cols = c(sample_table %>% pull(sample)),
+                 names_to = "sample_ID",
+                 values_to = "count") %>% 
+  group_by(MAG_ID, sample_ID) %>% 
+  summarise(count = sum(count)) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = MAG_ID, 
+              names_from = sample_ID, 
+              values_from = count) %>% 
+  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_MAG_TPM_counts.tsv")
+
+rm(tmp)
+```
+

@@ -20,10 +20,13 @@ library(GGally)
 library(ggnewscale)
 library(patchwork)
 ```
+
 This script explores and analyses the metatranscriptomics data.
 
 ## Functions
-### Principal component analysis visualisations 
+
+### Principal component analysis visualisations
+
 ```{r}
 visualise_PCA <- function(pca_results, sample_data){
   
@@ -72,7 +75,8 @@ visualise_PCA <- function(pca_results, sample_data){
 }
 ```
 
-### Multidimensional scaling visualisations 
+### Multidimensional scaling visualisations
+
 ```{r}
 visualise_MDS <- function(count_data, sample_data){ 
   
@@ -132,7 +136,9 @@ visualise_MDS <- function(count_data, sample_data){
   return(p.all)
 }
 ```
+
 ### Boxplot visualisations
+
 ```{r}
 visualise_boxplot <- function(count_data, sample_data){  
   
@@ -171,7 +177,9 @@ visualise_boxplot <- function(count_data, sample_data){
   return(p.all)
 }
 ```
+
 ## Read sample information
+
 ```{r}
 sample_info <- 
   read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = '#') %>% 
@@ -184,15 +192,21 @@ sample_info <-
   separate(sample_ID, extra = "drop", into = "sample", remove = FALSE) %>% 
   mutate(sample = str_remove_all(sample, "[0-9]$"))
 ```
+
 ## Assessment of samples
+
 ### Transcripts per million normalised data
+
 Read in table of TPM normalised data
+
 ```{r}
 tpm_counts <- 
   read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_TPM_counts.tsv") %>% 
   filter(rowSums(select(., all_of(sample_info$sample_ID))) > 0) 
 ```
+
 #### Principal component analysis (PCA) of all samples
+
 ```{r}
   tpm_counts %>% 
   select(-Bakta_ID, -Length, -EffectiveLength, -Name) %>% 
@@ -201,17 +215,23 @@ tpm_counts <-
   prcomp(scale. = TRUE) %>% 
   visualise_PCA(sample_data = sample_info)
 ```
+
 #### Multidimensional Scaling
+
 ```{r}
 tpm_counts %>% visualise_MDS(sample_data = sample_info)
 ```
 
 #### Boxplot
+
 ```{r}
 visualise_boxplot(tpm_counts, sample_info)
 ```
+
 ### Raw count data
+
 #### Principal component analysis
+
 ```{r}
 counts <- 
   read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_counts.tsv") %>% 
@@ -224,16 +244,21 @@ counts %>%
   prcomp(scale. = TRUE) %>% 
   visualise_PCA(sample_data = sample_info)
 ```
+
 #### Multidimensional scaling
+
 ```{r}
 counts %>% visualise_MDS(sample_data = sample_info)
 ```
 
 #### Boxplot
+
 ```{r}
 visualise_boxplot(counts, sample_info)
 ```
+
 ## Create expression object
+
 ```{r}
 exp_obj <- 
   counts %>%  
@@ -250,7 +275,9 @@ exp_obj <-
                           .transcript = feature,
                           .abundance = counts)
 ```
+
 ### TMM normalisation
+
 ```{r}
 scaled_counts_TMM <- 
   exp_obj %>%  
@@ -260,7 +287,9 @@ scaled_counts_TMM <-
               values_from = counts_scaled,
               names_from = sample)
 ```
+
 #### Principal component analysis
+
 ```{r}
 scaled_counts_TMM %>% 
   select(-feature) %>% 
@@ -269,14 +298,19 @@ scaled_counts_TMM %>%
   prcomp(scale. = TRUE) %>% 
   visualise_PCA(sample_data = sample_info)
 ```
+
 #### Multidimensional scaling
+
 ```{r}
 scaled_counts_TMM %>% visualise_MDS(sample_data = sample_info)
 ```
+
 ```{r}
 scaled_counts_TMM %>% visualise_boxplot(sample_data = sample_info)
 ```
+
 ### TMMwsp normalisation
+
 ```{r}
 scaled_counts_TMMwsp <- 
   exp_obj %>%  
@@ -286,7 +320,9 @@ scaled_counts_TMMwsp <-
               values_from = counts_scaled,
               names_from = sample)
 ```
+
 #### Principal component analysis
+
 ```{r}
 scaled_counts_TMMwsp %>% 
   select(-feature) %>% 
@@ -295,16 +331,20 @@ scaled_counts_TMMwsp %>%
   prcomp(scale. = TRUE) %>% 
   visualise_PCA(sample_data = sample_info)
 ```
+
 #### Multidimensional scaling
+
 ```{r}
 scaled_counts_TMMwsp %>% visualise_MDS(sample_data = sample_info)
 ```
+
 ```{r}
 scaled_counts_TMMwsp %>% 
   visualise_boxplot(sample_data = sample_info)
 ```
 
 ### RLE normalisation
+
 ```{r}
 scaled_counts_RLE <- 
   exp_obj %>%  
@@ -314,7 +354,9 @@ scaled_counts_RLE <-
               values_from = counts_scaled,
               names_from = sample)
 ```
+
 #### Principal component analysis
+
 ```{r}
 scaled_counts_RLE %>% 
   select(-feature) %>% 
@@ -323,14 +365,19 @@ scaled_counts_RLE %>%
   prcomp(scale. = TRUE) %>% 
   visualise_PCA(sample_data = sample_info)
 ```
+
 #### Multidimensional scaling
+
 ```{r}
 scaled_counts_RLE %>% visualise_MDS(sample_data = sample_info)
 ```
+
 ```{r}
 scaled_counts_RLE %>% visualise_boxplot(sample_data = sample_info)
 ```
+
 ### Upperquartile normalisation
+
 ```{r}
 scaled_counts_uq <- 
   exp_obj %>%  
@@ -340,7 +387,9 @@ scaled_counts_uq <-
               values_from = counts_scaled,
               names_from = sample)
 ```
+
 #### Principal component analysis
+
 ```{r}
 scaled_counts_uq %>% 
   select(-feature) %>% 
@@ -349,15 +398,19 @@ scaled_counts_uq %>%
   prcomp(scale. = TRUE) %>% 
   visualise_PCA(sample_data = sample_info)
 ```
+
 #### Multidimensional scaling
+
 ```{r}
 scaled_counts_uq %>% visualise_MDS(sample_data = sample_info)
 ```
+
 ```{r}
 scaled_counts_uq %>% visualise_boxplot(sample_data = sample_info)
 ```
 
 ### Adjust abundance
+
 ```{r}
 adjusted_counts <- 
   exp_obj %>%  
@@ -368,7 +421,9 @@ adjusted_counts <-
               values_from = counts_adjusted,
               names_from = sample)
 ```
+
 #### Principal component analysis
+
 ```{r}
 adjusted_counts %>% 
   select(-feature) %>% 
@@ -377,15 +432,21 @@ adjusted_counts %>%
   prcomp(scale. = TRUE) %>% 
   visualise_PCA(sample_data = sample_info)
 ```
+
 #### Multidimensional scaling
+
 ```{r}
 adjusted_counts %>% visualise_MDS(sample_data = sample_info)
 ```
+
 ```{r}
 adjusted_counts %>% visualise_boxplot(sample_data = sample_info)
 ```
+
 ### Adjusted and scaled data
-Using Combat batch correction with TMMwsp scaling. The latter is recommended for data with very low and very highly expressed transcripts. 
+
+Using Combat batch correction with TMMwsp scaling. The latter is recommended for data with very low and very highly expressed transcripts.
+
 ```{r}
 counts_adjusted <- 
   exp_obj %>% 
@@ -403,7 +464,9 @@ counts_adjusted_scaled <-
   scale_abundance(.abundance = counts, 
                   method = "TMMwsp") 
 ```
+
 #### Principal component analysis
+
 ```{r}
 counts_adjusted_scaled_wide <- 
   counts_adjusted_scaled %>% 
@@ -420,12 +483,15 @@ counts_adjusted_scaled_wide %>%
   prcomp(scale. = TRUE) %>% 
   visualise_PCA(sample_data = sample_info)
 ```
+
 #### Multidimensional scaling
+
 ```{r}
 counts_adjusted_scaled_wide %>% visualise_MDS(sample_data = sample_info)
 ```
 
 Inspect which sample is causing the characteristics in the plot.
+
 ```{r}
 mds_results <- 
     counts_adjusted_scaled_wide %>% 
@@ -450,7 +516,9 @@ mds_results %>%
  
 
 ```
+
 Now, we exclude the TI2_L002 sample and observe the MDS plot
+
 ```{r}
 mds_results <- 
     counts_adjusted_scaled_wide %>% 
@@ -479,16 +547,21 @@ mds_results %>%
 ```{r}
 counts_adjusted_scaled_wide %>% visualise_boxplot(sample_data = sample_info) 
 ```
+
 ```{r}
 ## Clear workspace before performing DE analyses
 rm(scaled_counts_RLE, scaled_counts_TMM, scaled_counts_TMMwsp, counts_adjusted_scaled_wide, scaled_counts_uq, tpm_counts)
 gc()
 ```
+
 ## Differential expression analyses
+
 Given that none of the scaling methods work particularly well, we proceed with the standard approach of TMMwsp scaling.
 
 ### All data
+
 Full transcriptomics analyses using all the replicates for differential expression analysis.
+
 ```{r}
 de_all <-
   exp_obj %>%
@@ -544,7 +617,9 @@ write_tsv(de_all %>% as_tibble, "/Users/shaman.narayanasamy/Work/Data/KAUST/memb
 ```
 
 ### Separate analysis of replicates
+
 Each replicate is subselected for individual differential expression analysis.
+
 ```{r}
 rm(de_all, se)
 gc()
@@ -614,7 +689,9 @@ rm(de_replicate_tmp)
 ```
 
 ## Compute composite p-values for complete analyses
+
 ### All data
+
 ```{r}
 de_dat <- read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-all.tsv")
 
@@ -651,6 +728,7 @@ de_dat <-
 write_tsv(de_dat, paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_refined-all.tsv"))
 rm(de_dat)
 ```
+
 ```{r}
 replicate_id = 1
 
@@ -689,24 +767,3 @@ de_dat <-
 write_tsv(de_dat, paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_refined-", replicate_id, ".tsv"))
 rm(de_dat)
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
