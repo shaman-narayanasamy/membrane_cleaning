@@ -40,11 +40,15 @@ This analysis focuses on the MAG "TI2_MAGScoT_cleanbin_000096" which represents 
 
 
 ```{r load_MAG_data}
+MAGs_of_interest <- c("TI2_MAGScoT_cleanbin_000096") 
+
 bakta2MAG_path <- '/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
 
 bakta2MAG <- sprintf('ssh iris "cat %s"', bakta2MAG_path ) %>%   
   pipe() %>%  
   read_tsv(col_names = c("MAG_ID", "Bakta_ID"))
+
+Bakta_IDs_of_interest <- filter(bakta2MAG, MAG_ID %in% c(MAGs_of_interest)) %>% pull(Bakta_ID)
 ```
 
 ```{r load_sample_information}
@@ -56,14 +60,13 @@ sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cle
 annotation_folder <- '/scratch/users/snarayanasamy/membrane_cleaning/output/annotation/all/bakta/'
 
 MAG_annotation <- 
-  sprintf('ssh iris "cat %s"', paste(annotation_folder, "*", paste0("*", ".tsv"), sep = '/')) %>%  
+  sprintf('ssh iris "cat %s"', paste(annotation_folder, MAGs_of_interest, paste0(MAGs_of_interest, ".tsv"), sep = '/')) %>%  
   pipe() %>%   
   read_tsv(comment = "#", col_names = F) %>% 
   select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9 )
 ```
 
 ```{r select_features_from_MAG}
-Bakta_IDs_of_interest <- filter(bakta2MAG, MAG_ID %in% c(MAGs_of_interest)) %>% pull(Bakta_ID)
 
 counts <- 
   read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_counts.tsv")
