@@ -29,6 +29,8 @@ library(plotly)
 library(ggrepel)
 library(GGally)
 library(tidyHeatmap)
+library(ggsignif)
+library(ggprism)
 ```
 ## Data 
 This analysis focuses on the MAG "TI2_MAGScoT_cleanbin_000096" which represents the Geobacter genus. We hereafter refer to this as "Geobacter MAG". For this analysis, we require the following information:
@@ -63,7 +65,7 @@ MAG_annotation <-
   sprintf('ssh iris "cat %s"', paste(annotation_folder, MAGs_of_interest, paste0(MAGs_of_interest, ".tsv"), sep = '/')) %>%  
   pipe() %>%   
   read_tsv(comment = "#", col_names = F) %>% 
-  select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9 )
+  select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9, contig = X1, start = X3, end = X4 )
 ```
 
 ```{r select_features_from_MAG}
@@ -1002,4 +1004,149 @@ counts %>%
   facet_wrap(~feature) +
   scale_y_log10() +
   theme_minimal()
+```
+
+## Biofilm formation
+Biofilm formation is a complex process and there is vast amounts of literature
+covering it. Two methods were employed to search for biofilm-related genes. 
+
+The first method was using a curated structured database of biofilm-related
+proteins: https://biofilms.biosim.pt/. This method failed as it did not match
+against any of the genes within our dataset.
+
+Next, we use keywords related to biofilm formation and search them against our
+gene annotations. These keywords include: "Biofilm", "Quorum sensing",
+"Adhesion", "Exopolysaccharide", "Motility", "Flagella", "Pili", "Extracellular"
+and "Matrix". *DISCLAIMER*: These keywords were collected via a shallow literature 
+search and with ChatGPT. 
+
+The keyword based search yielded a total of 28 genes of which a majority of them
+were related to "pili" and "flagella". Out of those, nine of them appeared to be
+significant and had an absolute fold-change \leq 2. Those genes appear to be
+downregulated in the treatment samples (@fig-biofilm_genes).
+
+```{r biofilm_symbols, eval = F}
+## Source table from Biofilm Structural Database
+#biofilm_genes <- 
+#read_csv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/biofilms-database-2023-12-13.csv', comment = "#") %>% 
+#  select(Protein) %>% distinct() %>% filter(!is.na(Protein)) %>% pull(Protein) 
+
+
+#Below are a list of some genes and gene categories commonly associated with
+#biofilm formation in bacteria:
+#
+#1. Adhesion Molecules and Surface Proteins:
+#
+#- fimH, flp, pilA: Typically involved in pilus formation.
+#- bap (Biofilm-associated protein): Common in Staphylococcus spp.
+#- icaA, icaD (InterCellular Adhesin): Important in polysaccharide intercellular adhesin (PIA) production, especially in Staphylococcus epidermidis.
+#
+#2. Exopolysaccharide (EPS) Synthesis Genes:
+#
+#- psl, pel: Genes in Pseudomonas aeruginosa for EPS production.
+#- vps (vibrio polysaccharide synthesis genes): Found in Vibrio spp.
+#
+#3. Quorum Sensing (QS) System Genes:
+#
+#- luxI, luxR: Autoinducer synthase and receptor genes in Vibrio spp.
+#- agrA-D (Accessory gene regulator): Important in Staphylococcus aureus.
+#- lasI, lasR, rhlI, rhlR: Key QS genes in Pseudomonas aeruginosa.
+#
+#4. Genes Regulating c-di-GMP Levels:
+#
+#- cdgA, cdgB, cdgC: Genes regulating cyclic di-GMP, a second messenger in biofilm formation.
+#
+#5. Stress Response and Tolerance Genes:
+#
+#- rpoS (Sigma S factor): Involved in stress response, common in E. coli.
+#- cspD: Cold shock protein, can be involved in biofilm formation under stress conditions.
+#
+#6. Motility and Chemotaxis Genes:
+#
+#- flg, fli, mot: Flagellar assembly genes.
+#- cheA, cheY: Chemotaxis genes.
+#
+#The gene symbols are complied into a list and are searched through the annotations.
+
+biofilm_genes <- c("fimH", "flp", "pilA", "bap", "icaA", "icaB", "icaC", "icaD", 
+                   "psl", "pel", "vps", "luxI", "luxR", "agrA", "agrB", 
+                   "agrC", "agrD", "lasI", "lasR", "rhlI", "rhlR", 
+                   "cdgA", "cdgB", "cdgC", "rpoS", "cspD", "flg", 
+                   "fli", "mot", "cheA", "cheY", "fnbA", "fnbB",
+                   "clfA", "clfB", "fib", "epbs", "eno", "cna")
+
+
+MAG_annotation %>% filter(gene_symbol %in% biofilm_genes) %>% 
+  filter(!is.na(gene_symbol)) %>% inner_join(comp_de_norm, by = "feature") %>% 
+  left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
+  filter(counts > 1) %>% 
+# make faceted stripchart
+  ggplot(aes(x = condition, y = counts + 1, fill = condition, group = condition)) +
+  geom_boxplot() +
+  geom_jitter() +
+  facet_wrap(~feature) +
+  scale_y_log10() +
+  theme_minimal()
+```
+
+```{r biofilm_keywords}
+keywords <- c("Biofilm", "Quorum sensing", "Adhesion", "Exopolysaccharide", "Motility", "Flagella", "Pili", "Extracellular", "matrix")
+
+# Creating a regex pattern from the keywords
+pattern <- paste(keywords, collapse = "|")
+```
+
+```{r}
+#| label: fig-biofilm_genes
+#| fig-cap: "Strip-violin-chart of the most significantly expressed biofilm-related genes." 
+#| fig-height: 7
+
+annot_dat <- 
+  MAG_annotation %>% 
+  filter(grepl(pattern, gene_function, ignore.case = TRUE)) %>% 
+  inner_join(comp_de_norm, by = "feature") %>% 
+  left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
+  filter(counts > 1 & composite_p_val_fisher_fdr <= 0.05 & abs(combat_edgerQLT_logFC) >= abs(log2(2)) & significant_proportion)  %>% 
+  mutate(gene_name = coalesce(gene_symbol, gene_function)) %>% 
+      # Add a column to check for uniqueness
+  mutate(is_unique = !duplicated(gene_name) & !duplicated(gene_name, fromLast = TRUE)) %>%
+  # Modify non-unique values by appending from append_col
+  mutate(gene_name = if_else(is_unique, gene_name, paste0(gene_name, ": ", feature))) %>%
+  # Optionally remove the helper column
+  select(-is_unique) %>% 
+  select(feature, gene_name, composite_p_val_fisher_fdr, condition, counts) %>%
+  distinct() %>%
+  mutate(group1 = "control", group2 = "treatment",
+         composite_p_val_fisher_fdr = round(composite_p_val_fisher_fdr, 5)) %>%
+  group_by(feature) %>% 
+  mutate(ypos = max(counts)) %>% 
+  select(-counts) %>% 
+  distinct()
+
+MAG_annotation %>% 
+  filter(grepl(pattern, gene_function, ignore.case = TRUE)) %>% 
+  inner_join(comp_de_norm, by = "feature") %>% 
+  left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
+  filter(counts > 1 & composite_p_val_fisher_fdr <= 0.05 & abs(combat_edgerQLT_logFC) >= abs(log2(2)) & significant_proportion)  %>% 
+  mutate(gene_name = coalesce(gene_symbol, gene_function)) %>% 
+    # Add a column to check for uniqueness
+  mutate(is_unique = !duplicated(gene_name) & !duplicated(gene_name, fromLast = TRUE)) %>%
+  # Modify non-unique values by appending from append_col
+  mutate(gene_name = if_else(is_unique, gene_name, paste0(gene_name, ": ", feature))) %>%
+  # Optionally remove the helper column
+  select(-is_unique) %>% 
+  group_by(feature) %>% 
+  mutate(ypos = max(counts)) %>% 
+  ungroup() %>% 
+  mutate(replicate = as.character(replicate)) %>% 
+  ggplot(aes(x = condition, y = counts + 1, 
+             fill = condition, group = condition)) +
+  geom_violin(colour = NA, alpha = 0.5) +
+  geom_boxplot(colour = "gray75", alpha = 0.25, width = 0.1) +
+  geom_jitter(aes(colour = condition, shape = replicate), alpha = 0.25, ) +
+  facet_wrap(~gene_name) +
+  scale_y_log10() +
+  theme_minimal() +
+  add_pvalue(data = annot_dat, label = "Fisher FDR = {composite_p_val_fisher_fdr}", y.position = "ypos", bracket.nudge.y = 0.1) +
+  facet_wrap(~gene_name, ncol = 3) 
 ```
