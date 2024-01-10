@@ -10,6 +10,13 @@ execute:
   echo: false 
   warning: false
   message: false
+params:
+  mag_id:
+    label: "MAG ID"
+    value: "TI2_MAGScoT_cleanbin_000096"
+  cycle_id:
+    label: "Replicate ID"
+    value: 1
 ---
 # Description
 This document was generated directly from a quarto markdown file that contains the code for the analysis. To view the code, please visit the membrane cleaning github repository or request it from the author of this file.
@@ -33,34 +40,37 @@ library(sva) # Must be loaded AFTER tidySummarizedExperiment as there is a clash
 library(DESeq2)
 ```
 ## Data 
-This analysis focuses on the MAG "TI2_MAGScoT_cleanbin_000096" which represents the Geobacter genus. We hereafter refer to this as "Geobacter MAG". For this analysis, we require the following information:
+This analysis focuses on the MAG `r params$mag_id`` which represents the Geobacter genus. We hereafter refer to this as "Geobacter MAG". For this analysis, we require the following information:
 
 - Raw counts of all features/transcripts
 - List and annotation of all transcripts that belong to Geobacter
 - Sample information table
 
 ```{r load_MAG_data}
-MAGs_of_interest <- c("TI2_MAGScoT_cleanbin_000096") 
+mag_id <- params$mag_id
 
-bakta2MAG_path <- '/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
+bakta2MAG_path <- '/ibex/user/naras0c/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
 
-bakta2MAG <- sprintf('ssh iris "cat %s"', bakta2MAG_path ) %>%   
+bakta2MAG <- sprintf('ssh ibex "cat %s"', bakta2MAG_path ) %>%   
   pipe() %>%  
   read_tsv(col_names = c("MAG_ID", "Bakta_ID"))
 
-Bakta_IDs_of_interest <- filter(bakta2MAG, MAG_ID %in% c(MAGs_of_interest)) %>% pull(Bakta_ID)
+Bakta_IDs_of_interest <- filter(bakta2MAG, MAG_ID %in% c(mag_id)) %>% pull(Bakta_ID)
 ```
 
 ```{r load_sample_information}
+cycle_id = params$cycle_id
+
 sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
   mutate(sample_ID = paste(sample, lane, sep = '_'),
          lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
-  select(sample_ID, cycle = replicate, everything(), -sample, -R1, -R2) 
+  select(sample_ID, cycle = replicate, everything(), -sample, -R1, -R2) %>% 
+  filter(cycle == cycle_id)
 
-annotation_folder <- '/scratch/users/snarayanasamy/membrane_cleaning/output/annotation/all/bakta/'
+annotation_folder <- '/ibex/user/naras0c/membrane_cleaning/output/annotation/all/bakta/'
 
 MAG_annotation <- 
-  sprintf('ssh iris "cat %s"', paste(annotation_folder, MAGs_of_interest, paste0(MAGs_of_interest, ".tsv"), sep = '/')) %>%  
+  sprintf('ssh ibex "cat %s"', paste(annotation_folder, mag_id, paste0(mag_id, ".tsv"), sep = '/')) %>%  
   pipe() %>%   
   read_tsv(comment = "#", col_names = F) %>% 
   select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9, contig = X1, start = X3, end = X4 )
@@ -80,7 +90,16 @@ counts <-
   left_join(sample_info, by = "sample_ID") %>% 
   separate(sample_ID, into = c("SampleName"), sep = '_', remove = F, extra = "drop") %>% 
   mutate(SampleName = str_remove(SampleName, "\\d+")) %>% 
-  select(feature = Name, sample = sample_ID, counts, SampleName, condition, phase, cycle, lane, Run = sample_ID, avgLength = EffectiveLength) %>% 
+  select(feature = Name, 
+         sample = sample_ID, 
+         counts, 
+         SampleName, 
+         condition, 
+         phase, 
+         cycle, 
+         lane, 
+         Run = sample_ID, 
+         avgLength = EffectiveLength) %>% 
   as_SummarizedExperiment(.sample = sample,
                           .transcript = feature,
                           .abundance = counts)
@@ -104,6 +123,7 @@ dds <- DESeq2::DESeqDataSet(counts %>% as_tibble() %>% mutate(counts = as.intege
                                                               cycle = as.factor(cycle),
                                                               lane = as.factor(lane)
                                                               ) %>% 
+                              select(-cycle) %>% 
       as_SummarizedExperiment(.abundance = counts, .sample = sample, .transcript = feature),   
       design = ~ condition + lane)
 ```
@@ -111,8 +131,8 @@ dds <- DESeq2::DESeqDataSet(counts %>% as_tibble() %>% mutate(counts = as.intege
 ```{r compbat_seq_scaling, output = F}
 combat_counts <- 
   ComBat_seq(counts(dds), 
-             batch = colnames(dds) %>% as_tibble() %>% rename(sample = value) %>% left_join(sample_info, by = c("sample" = "sample_ID")) %>% pull(cycle),
-             group = colnames(dds) %>% as_tibble() %>% rename(sample = value) %>% left_join(sample_info, by = c("sample" = "sample_ID")) %>% pull(condition)
+             batch = dds$lane,
+             group = dds$condition
              ) %>% 
   as_tibble(rownames = "feature") %>% 
   pivot_longer(cols = sample_info$sample_ID, names_to = "sample", values_to = "combat_counts") %>% 
@@ -179,49 +199,29 @@ MAG_annotation %>%
   scale_y_log10() +
   theme_minimal()
 ```
-```{r visualise_hkg_cycles}
-#| fig-cap: "Expression of housekeeping genes within cycles based on raw counts."
-#| label: fig-hkg_expression_cycle
-MAG_annotation %>% 
+```{r hkg_selection}
+top_hkg <- 
+  MAG_annotation %>% 
   filter(gene_symbol %in% housekeeping_genes) %>% 
   left_join(counts %>% as_tibble(), by = "feature") %>% 
-  mutate(cycle = as.character(cycle)) %>% 
-  # make faceted stripchart
-  ggplot(aes(x = cycle, y = counts + 1, fill = cycle, group = cycle)) +
-  geom_boxplot() +
-  geom_jitter() +
-  facet_wrap(~gene_symbol) +
-  scale_y_log10() +
-  theme_minimal()
-```
-```{r hkg_cycle_tables, message=F, warning=F, eval = F}
-housekeeping_cycles <- list()
-for (cycle_id in unique(sample_info$cycle)) {
- 
-   housekeeping_cycles[[cycle_id]] <-  
-     MAG_annotation %>%  
-     filter(gene_symbol %in% housekeeping_genes) %>% 
-     left_join(counts %>% as_tibble(), by = "feature") %>% 
-     filter(cycle == cycle_id) %>% 
-     group_by(feature, sample) %>% 
-     summarize(
-       avg_count = mean(counts, na.rm = TRUE)
-     ) %>%
-     ungroup() %>% 
-     group_by(feature) %>% 
-       summarize(
-       mean_count = mean(avg_count, na.rm = TRUE),
-       sd_count = sd(avg_count, na.rm = TRUE),
-       cv = sd_count / mean_count
-     ) %>%
-     arrange(cv) %>% 
-     left_join(MAG_annotation)
-   
-}
-```
+  group_by(feature, sample) %>% 
+  summarize(
+    avg_count = mean(counts, na.rm = TRUE)
+  ) %>%
+  ungroup() %>% 
+  group_by(feature) %>% 
+    summarize(
+    mean_count = mean(avg_count, na.rm = TRUE),
+    sd_count = sd(avg_count, na.rm = TRUE),
+    cv = sd_count / mean_count
+  ) %>%
+  ungroup() %>% 
+  arrange(cv) %>% 
+  pull("feature") %>% 
+  .[1] 
 
-```{r hkg_selection}
-hkg_vector <- rownames(dds) %in% "CLCDCC_00215" 
+hkg_vector <- rownames(dds) %in% top_hkg
+
 dds_hkg <- DESeq2::estimateSizeFactors(dds, controlGenes = hkg_vector)
 
 ## Convert back again to tidybulk experimental object to ensure downstream compatibility
@@ -257,33 +257,28 @@ MAG_annotation %>%
   knitr::kable(digits = 2, caption = "List of genes that could be used for houskeeping gene based normalisation. The mean and standard deviation (sd) are based on the raw read counts and the coefficient of variation (cv) represents the variation of these genes accross all samples and cycles. Lower cv represents less variation. Genes with the least variation should used as references in housekeeping gene normalisation.")
 ```
 
-#### Inspect housekeeping genes within each cycle
-```{r hkg_cycles, message=F, warning=F}
-housekeeping_cycles <- list()
-
-for (cycle_id in unique(sample_info$cycle)) {
-    housekeeping_cycles[[cycle_id]] <-  
-     MAG_annotation %>%  
-     filter(gene_symbol %in% housekeeping_genes) %>% 
-     left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
-     filter(cycle == cycle_id) %>% 
-     group_by(feature, sample) %>% 
-     summarize(
-       avg_count = mean(counts, na.rm = TRUE)
-     ) %>%
-     ungroup() %>% 
-     group_by(feature) %>% 
-       summarize(
-       mean_count = mean(avg_count, na.rm = TRUE),
-       sd_count = sd(avg_count, na.rm = TRUE),
-       cv = sd_count / mean_count
-     ) %>%
-     arrange(cv) %>% 
-     left_join(MAG_annotation)
-}
-```
 ```{r}
-hkg_vector <- rownames(dds) %in% "CLCDCC_00215"
+top_hkg <- 
+  MAG_annotation %>% 
+  filter(gene_symbol %in% housekeeping_genes) %>% 
+  left_join(counts %>% as_tibble(), by = "feature") %>% 
+  group_by(feature, sample) %>% 
+  summarize(
+    avg_count = mean(counts, na.rm = TRUE)
+  ) %>%
+  ungroup() %>% 
+  group_by(feature) %>% 
+    summarize(
+    mean_count = mean(avg_count, na.rm = TRUE),
+    sd_count = sd(avg_count, na.rm = TRUE),
+    cv = sd_count / mean_count
+  ) %>%
+  ungroup() %>% 
+  arrange(cv) %>% 
+  pull("feature") %>% 
+  .[1] 
+
+hkg_vector <- rownames(dds) %in% top_hkg
 dds_hkg <- DESeq2::estimateSizeFactors(dds, controlGenes = hkg_vector)
 
 ## Convert back again to tidybulk experimental object to ensure downstream compatibility
@@ -297,17 +292,14 @@ hkg_combat_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(r
                           .transcript = feature)
 ```
 In general, there is a high variability for the all the housekeeping genes (HKG)
-that we evaluated, either based on condition (@fig-hkg_expression_conditions)
-and cycle (@fig-hkg_expression_cycles) -level expression, which may not
-make them suitable to be used as a reference for scaling. @tbl-hkg_genes_count
-summarises the variability of HKGs across all samples. However, if we must make
-a choice, 'dnaK', would be selected as the reference HKG as it shows the lowest
-coefficient of variation (cv). Equivalent evaluation was conducted for
-ComBat-seq normalised data (@tbl-hkg_genes_combat) reveals that the ComBat batch
-correction procedure significantly reduced the variability between housekeeping
-genes. Similarly, 'dnaK' once again appeared as the least variable genes. Based
-on this, the normalisation of housekeeping genes for both raw counts and
-ComBat-seq normalised data will use 'dnaK' as the HKG for scaling.
+that we evaluated (@fig-hkg_expression_conditions), which may not make them
+suitable to be used as a reference for scaling. @tbl-hkg_genes_count summarises
+the variability of HKGs across all samples. However, if we must make a choice,
+we select the HKG with the lowest coefficient of variation (cv) as the reference
+housekeeping gene. Equivalent evaluation was conducted for ComBat-seq normalised
+data (@tbl-hkg_genes_combat) reveals that the ComBat batch correction procedure
+significantly reduced the variability between HKGs. Similarly, the least
+variable gene is automatically selected as the reference HKG. 
 
 ## Evaluation of data
 ```{r initiate_plot_lists}
@@ -332,7 +324,7 @@ p.pca[[1]] <-
   counts %>%
   reduce_dimensions(method = "PCA") %>% 
   pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = PC1, y = PC2, colour = as.character(cycle), shape = phase)) +
+  ggplot(aes(x = PC1, y = PC2, colour = as.character(condition), shape = phase)) +
   geom_point() +
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
@@ -342,7 +334,7 @@ p.mds[[1]] <-
   counts %>%
   reduce_dimensions(method = "MDS") %>% 
   pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(cycle), shape = phase)) +
+  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(condition), shape = phase)) +
   geom_point() +
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
@@ -350,7 +342,7 @@ p.mds[[1]] <-
 ```{r boxplot_raw_counts}
 p.bp[[1]] <-  
   counts %>% as_tibble() %>%  
-  ggplot(aes(x = .sample, y = log(counts), fill = as.character(cycle))) +
+  ggplot(aes(x = .sample, y = log(counts), fill = as.character(condition))) +
   geom_boxplot() 
 ```
 ```{r density_raw_counts}
@@ -370,7 +362,7 @@ p.hm[[1]] <-
   # extract 100 most variable genes
   keep_variable(.abundance = counts, top = 100) %>%
   as_tibble() %>%
-  mutate(cycle = as.character(cycle), 
+  mutate(condition = as.character(condition), 
          lane = as.character(lane)) %>% 
   
   # create heatmap
@@ -382,7 +374,6 @@ p.hm[[1]] <-
     name = "counts"
   ) %>%
   add_tile(condition) %>%
-  add_tile(cycle) %>% 
   add_tile(lane)
 ```
 
@@ -391,7 +382,7 @@ p.pca[[2]] <-
   combat_counts %>%
   reduce_dimensions(method = "PCA") %>% 
   pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = PC1, y = PC2, colour = as.character(cycle), shape = phase)) +
+  ggplot(aes(x = PC1, y = PC2, colour = as.character(condition), shape = phase)) +
   geom_point() +
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
@@ -402,7 +393,7 @@ p.mds[[2]] <-
   combat_counts %>%
   reduce_dimensions(method = "MDS") %>% 
   pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(cycle), shape = phase)) +
+  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(condition), shape = phase)) +
   geom_point() +
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
@@ -411,7 +402,7 @@ p.mds[[2]] <-
 ```{r boxplot_combat}
 p.bp[[2]] <- 
   combat_counts %>% as_tibble() %>% 
-  ggplot(aes(x = sample, y = log(counts), fill = as.character(cycle))) + 
+  ggplot(aes(x = sample, y = log(counts), fill = as.character(condition))) + 
   geom_boxplot() 
 ```
 ```{r density_plot_combat}
@@ -430,7 +421,7 @@ p.hm[[2]] <-
   # extract 100 most variable genes
   keep_variable(.abundance = counts, top = 100) %>%
   as_tibble() %>%
-  mutate(cycle = as.character(cycle), 
+  mutate(condition = as.character(condition), 
          lane = as.character(lane)) %>% 
   
   # create heatmap
@@ -442,7 +433,6 @@ p.hm[[2]] <-
     name = "combat"
   ) %>%
   add_tile(condition) %>%
-  add_tile(cycle) %>% 
   add_tile(lane)
 ```
 
@@ -451,7 +441,7 @@ p.pca[[3]] <-
   hkg_counts %>%
   reduce_dimensions(method = "PCA") %>% 
   pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = PC1, y = PC2, colour = as.character(cycle), shape = phase)) +
+  ggplot(aes(x = PC1, y = PC2, colour = as.character(condition), shape = phase)) +
   geom_point() +
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
@@ -461,7 +451,7 @@ p.mds[[3]] <-
   hkg_counts %>%
   reduce_dimensions(method = "MDS") %>% 
   pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(cycle), shape = phase)) +
+  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(condition), shape = phase)) +
   geom_point() +
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
@@ -469,7 +459,7 @@ p.mds[[3]] <-
 ```{r boxplot_hkg}
 p.bp[[3]] <- 
   hkg_counts %>% as_tibble() %>%   
-  ggplot(aes(x = .sample, y = log(counts), fill = as.character(cycle))) +
+  ggplot(aes(x = .sample, y = log(counts), fill = as.character(condition))) +
   geom_boxplot() 
 ```
 ```{r density_plot_hkg}
@@ -488,7 +478,7 @@ p.hm[[3]] <-
   # extract 100 most variable genes
   keep_variable(.abundance = counts, top = 100) %>%
   as_tibble() %>%
-  mutate(cycle = as.character(cycle), 
+  mutate(condition = as.character(condition), 
          lane = as.character(lane)) %>% 
   
   # create heatmap
@@ -499,7 +489,6 @@ p.hm[[3]] <-
     transform = log1p
   ) %>%
   add_tile(condition) %>%
-  add_tile(cycle) %>% 
   add_tile(lane)
 ```
 ```{r pca_combat_hkg}
@@ -507,7 +496,7 @@ p.pca[[4]] <-
   hkg_combat_counts %>%
   reduce_dimensions(method = "PCA") %>% 
   pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = PC1, y = PC2, colour = as.character(cycle), shape = phase)) +
+  ggplot(aes(x = PC1, y = PC2, colour = as.character(condition), shape = phase)) +
   geom_point() +
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
@@ -517,7 +506,7 @@ p.mds[[4]] <-
   hkg_combat_counts %>%
   reduce_dimensions(method = "MDS") %>% 
   pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(cycle), shape = phase)) +
+  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(condition), shape = phase)) +
   geom_point() +
   geom_text_repel(aes(label = .sample), show.legend = FALSE) +
   theme_minimal()
@@ -525,7 +514,7 @@ p.mds[[4]] <-
 ```{r boxplot_combat_hkg}
 p.bp[[4]] <- 
   hkg_combat_counts %>% as_tibble() %>%  
-  ggplot(aes(x = .sample, y = log(counts), fill = as.character(cycle))) +
+  ggplot(aes(x = .sample, y = log(counts), fill = as.character(condition))) +
   geom_boxplot() 
 ```
 ```{r density_plot_combat_hkg}
@@ -544,7 +533,7 @@ p.hm[[4]] <-
   # extract 100 most variable genes
   keep_variable(.abundance = counts, top = 100) %>%
   as_tibble() %>%
-  mutate(cycle = as.character(cycle), 
+  mutate(condition = as.character(condition), 
          lane = as.character(lane)) %>% 
   
   # create heatmap
@@ -555,7 +544,6 @@ p.hm[[4]] <-
     transform = log1p
   ) %>%
   add_tile(condition) %>%
-  add_tile(cycle) %>% 
   add_tile(lane)
 ```
 
@@ -654,7 +642,7 @@ p.hm[[4]]
 
 Dimensionality reduction using principal component analysis (PCA; @fig-pca) and
 multi-dimensional scaling (MDS; @fig-mds) show that there is no clustering
-solely based on cycle number in the raw counts and in the scaled/normalised
+solely based on condition in the raw counts and in the scaled/normalised
 data. It can be observed that the housekeeping gene (HKG) -based scaling creates
 the most effect when applied to the raw and ComBat-seq normalised counts. It
 must be noted that this pattern is *not* observed when performing the same
@@ -708,12 +696,15 @@ A transcript that is significantly differentially expressed based on the followi
 visualises the expression of the most significant genes.
 
 
-
+```{r define_expression_object_list}
+expr_list <- list("raw" = counts, "combat" = combat_counts, "hkg" = hkg_counts, "combat_hkg" = hkg_combat_counts)
+```
 ```{r function_de}
 ## Function: Perform all DE analysis methods on given tables/normalisations including different phases
 compute_DE_genes <- function(expr_list, phase_value = "normal"){ 
   
   for (i in 1:length(expr_list)){ 
+    
     expr_obj <-
       expr_list[[i]] %>% 
       filter(phase == {{ phase_value }}) %>% 
@@ -726,26 +717,23 @@ compute_DE_genes <- function(expr_list, phase_value = "normal"){
        expr_obj %>% 
       # edgeR QLT
       test_differential_abundance(
-        ~ 0 + condition + cycle + lane,
+        ~ condition + lane,
         method = "edgeR_quasi_likelihood",
-        prefix = paste0(expr_source, "_", "edgerQLT_"),
-        contrasts = c("conditiontreatment - conditioncontrol")
+        prefix = paste0(expr_source, "_", "edgerQLT_")
       ) %>%
     
       # edgeR LRT
       test_differential_abundance(
-        ~ 0 + condition + cycle + lane,
+        ~ condition + lane,
         method = "edgeR_likelihood_ratio",
-        prefix = paste0(expr_source, "_", "edgerLR_"),
-        contrasts = c("conditiontreatment - conditioncontrol")
+        prefix = paste0(expr_source, "_", "edgerLR_")
       ) %>%
     
       # limma-voom
       test_differential_abundance(
-        ~ 0 + condition + cycle + lane,
+        ~ condition + lane,
         method = "limma_voom",
-        prefix = paste0(expr_source, "_", "voom_"),
-        contrasts = c("conditiontreatment - conditioncontrol")
+        prefix = paste0(expr_source, "_", "voom_")
       ) 
     
     ## DESeq2
@@ -757,10 +745,9 @@ compute_DE_genes <- function(expr_list, phase_value = "normal"){
                               .abundance = counts,
                               .transcript = feature) %>% 
       test_differential_abundance(
-        ~ 0 + condition + cycle + lane,
+        ~ condition + lane,
         method = "DESeq2",
-        prefix = paste0(expr_source, "_", "DESeq2_"),
-        contrasts = list(c("condition", "treatment", "control"))
+        prefix = paste0(expr_source, "_", "DESeq2_")
         ) %>% 
       as_tibble() %>% 
       select(contains("DESeq2_")) %>% 
@@ -809,127 +796,6 @@ compute_DE_genes <- function(expr_list, phase_value = "normal"){
   } 
   return(de_res)
   }
-```
-```{r function_de_cycle}
-## Function: Perform all DE analysis methods on given tables/normalisations including different phases and cycles
-compute_DE_genes_cycle <- function(expr_list, phase_value = "normal"){ 
-  
-  for (i in 1:length(expr_list_cycle)){  
-    
-    expr_source <- names(expr_list)[i]
-    
-    print(paste0("Now processing ", expr_source))
-    
-    #for (j in 1:3){ 
-      expr_obj <-  
-        expr_list[[i]] %>% 
-        filter(phase == {{ phase_value }} ) %>% 
-        keep_abundant(minimum_counts = 1) 
-     
-      tmp_de_res <-  
-       
-         expr_obj %>% 
-        # edgeR QLT
-        test_differential_abundance(
-          ~ 0 + condition + lane,
-          method = "edgeR_quasi_likelihood",
-          prefix = paste0(expr_source, "_", "edgerQLT_"),
-          contrasts = c("conditiontreatment - conditioncontrol")
-        ) %>%
-      
-        # edgeR LRT
-        test_differential_abundance(
-          ~ 0 + condition + lane,
-          method = "edgeR_likelihood_ratio",
-          prefix = paste0(expr_source, "_", "edgerLR_"),
-          contrasts = c("conditiontreatment - conditioncontrol")
-        ) %>%
-      
-        # limma-voom
-        test_differential_abundance(
-          ~ 0 + condition + lane,
-          method = "limma_voom",
-          prefix = paste0(expr_source, "_", "voom_"),
-          contrasts = c("conditiontreatment - conditioncontrol")
-        ) 
-      
-      ## DESeq2
-      tmp_de_res <-  
-        expr_obj %>% 
-        as_tibble() %>% 
-        mutate(counts = round(counts)) %>% 
-        as_SummarizedExperiment(.sample = sample, 
-                                .abundance = counts,
-                                .transcript = feature) %>% 
-        test_differential_abundance(
-          ~ 0 + condition + lane,
-          method = "DESeq2",
-          prefix = paste0(expr_source, "_", "DESeq2_"),
-          contrasts = list(c("condition", "treatment", "control"))
-          ) %>% 
-        as_tibble() %>% 
-        select(contains("DESeq2_")) %>% 
-        bind_cols(tmp_de_res %>% as_tibble(), .) %>%  
-        as_SummarizedExperiment(.sample = sample,
-                                .abundance = counts,
-                                .transcript = feature)
-       
-      ## Now join the tables 
-      if (i == 1){
-        de_res <- 
-          tmp_de_res %>% 
-          as_tibble() %>% 
-          distinct() %>%   
-          select(-c(".feature",   
-                    ".sample", 
-                    "counts", 
-                    "sample", 
-                    "SampleName", 
-                    "condition", 
-                    "phase", 
-                    "cycle", 
-                    "lane", 
-                    "Run", 
-                    ".abundant")) %>%  
-          distinct()
-      } else {
-        de_res <-  
-          full_join(de_res, 
-                    tmp_de_res %>% as_tibble() %>%   
-                      select(-c(".feature",   
-                                ".sample", 
-                                "counts", 
-                                "sample", 
-                                "SampleName", 
-                                "condition", 
-                                "phase", 
-                                "cycle", 
-                                "lane", 
-                                "Run", 
-                                ".abundant")) %>%  
-                      distinct(),  
-                    by = c("feature", "avgLength")) %>%   
-          distinct() 
-        } 
-     # }
-  } 
-  return(de_res)
-}
-```
-
-```{r}
-#de_obj.1 <- 
-  counts %>% filter(cycle == 1 & phase == "normal") %>% 
-      test_differential_abundance(
-        ~ 0 + condition +  lane,
-        method = "edgeR_quasi_likelihood",
-        prefix = paste0("counts", "_", "edgerQLT_"),
-        contrasts = c("conditiontreatment - conditioncontrol")
-        
-      ) #%>% as_tibble()
-
-de_obj.1 %>% as_tibble() %>% 
-  filter("counts_edgerQLT_PValue___conditiontreatment - conditioncontrol" < 1.0)
 ```
 
 ```{r function_expression_consistency}
@@ -1004,12 +870,6 @@ compute_composite_DE_results <- function(de_res){
 }
 ```
 
-```{r define_expression_object_list}
-expr_list <- list("raw" = counts, "combat" = combat_counts, "hkg" = hkg_counts, "combat_hkg" = hkg_combat_counts)
-
-
-```
-
 ```{r}
 de_norm <- compute_DE_genes(expr_list = expr_list, phase = "normal")
 comp_de_norm <- compute_composite_DE_results(de_norm)
@@ -1018,29 +878,6 @@ comp_de_norm <- compute_composite_DE_results(de_norm)
 de_bflush <- compute_DE_genes(expr_list = expr_list, phase = "backflush")
 comp_de_bflush <- compute_composite_DE_results(de_bflush)
 ```
-
-## Compute DE based on each cycle
-```{r}
-expr_list_cycle <- list("raw1" = counts %>% filter(cycle == 1), 
-                        "combat1" = combat_counts %>% filter(cycle == 1), 
-                        "hkg1" = hkg_counts %>% filter(cycle == 1), 
-                        "combat_hkg" = hkg_combat_counts %>% filter(cycle == 1), 
-                        "raw2" = counts %>% filter(cycle == 2), 
-                        "combat2" = combat_counts %>% filter(cycle == 2), 
-                        "hkg2" = hkg_counts %>% filter(cycle == 2), 
-                        "combat_hkg3" = hkg_combat_counts %>% filter(cycle == 2),
-                        "raw3" = counts %>% filter(cycle == 3), 
-                        "combat3" = combat_counts %>% filter(cycle == 3)#, 
-                        #"hkg3" = hkg_counts %>% filter(cycle == 3), 
-                        #"combat_hkg3" = hkg_combat_counts %>% filter(cycle == 3)
-                  )
-```
-
-```{r}
-de_norm_cycle <- compute_DE_genes_cycle(expr_list_cycle, phase = "normal")
-comp_de_norm <- compute_composite_DE_results(de_norm)
-```
-
 ```{r write_full_table, eval = F}
 write_tsv(comp_de_norm, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_initial.tsv")
 write_tsv(comp_de_bflush, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_backflush.tsv")

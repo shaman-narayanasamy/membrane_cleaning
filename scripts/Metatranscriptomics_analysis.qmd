@@ -1,7 +1,7 @@
 ---
 title: "Metatranscriptomics analyses"
 author: "Shaman Narayanasamy"
-editor: visual
+editor: source
 ---
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
