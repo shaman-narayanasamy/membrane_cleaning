@@ -1,5 +1,6 @@
-name: catbat
+name: catbat_env
 channels:
   - bioconda
 dependencies:
   - cat
+prefix: /ibex/user/naras0c/conda-environments/catbat_env
