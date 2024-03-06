@@ -38,6 +38,16 @@ the directory. It can be unlocked as follows:
 $ launchers/sbatch_<launch_name>.sh --unlock
 ```
 
+## Rendering transcriptomics analysis markdown files
+Given that we are analysing multiple experiments separately, the scripts are designed to be modular, such that the parameters can be adjusted to perform the analysis of the relevant experiment/group. Here is the example of the command:
+```{shell}
+quarto render /Users/shaman.narayanasamy/Work/repositories/github/membrane_cleaning/scripts/MAG_cycle_metatranscriptomics_analysis.qmd --to html -P mag_id=TI2_MAGScoT_cleanbin_000096 -P cycle_id=1 -P phase_id=initial -o test_output.html --output-dir render
+```
+Accordingly:
+- `mag_id`: can be obtained from the list of MAGs, based on the BAKTA IDs
+- `cycle_id`: range 1-3
+- `phase_id`: "initial", "backflush"
+
 ## Configuration
 The `config` folder contains multiple `.yml` configuration files that you can use to set the parameters of 
 various programs used within the snakemake rules.

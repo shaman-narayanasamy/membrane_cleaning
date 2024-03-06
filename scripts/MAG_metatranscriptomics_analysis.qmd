@@ -57,10 +57,10 @@ sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cle
          lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
   select(sample_ID, cycle = replicate, everything(), -sample, -R1, -R2) 
 
-annotation_folder <- '/scratch/users/snarayanasamy/membrane_cleaning/output/annotation/all/bakta/'
+annotation_folder <- '/ibex/scratch/projects/c2188/membrane_cleaning/output/annotation/all/bakta/'
 
 MAG_annotation <- 
-  sprintf('ssh iris "cat %s"', paste(annotation_folder, MAGs_of_interest, paste0(MAGs_of_interest, ".tsv"), sep = '/')) %>%  
+  sprintf('ssh ibex "cat %s"', paste(annotation_folder, MAGs_of_interest, paste0(MAGs_of_interest, ".tsv"), sep = '/')) %>%  
   pipe() %>%   
   read_tsv(comment = "#", col_names = F) %>% 
   select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9, contig = X1, start = X3, end = X4 )
@@ -84,6 +84,7 @@ counts <-
   as_SummarizedExperiment(.sample = sample,
                           .transcript = feature,
                           .abundance = counts)
+
 ```
 ## Scaling and normalisation
 Scaling  and/or normalisation is typically carried out by individual

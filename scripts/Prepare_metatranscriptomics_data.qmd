@@ -12,7 +12,7 @@ library(rlang)
 This script compiles the data before performing analyses.
 ## Metatranscriptomics
 ```{r read_sample_info}
- quant_folder <-
+quant_folder <-
   '/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification/salmon/all'
  
 sample_table <- 

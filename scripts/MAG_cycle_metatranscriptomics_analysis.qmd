@@ -3,9 +3,10 @@ title: "MAG-level metatranscriptomics analysis"
 author: "Shaman Narayanasamy"
 editor: source
 fig-cap-location: bottom
+project:
+  output-dir: render/
 format:
   pdf: default
-  html: default
 execute:
   echo: false 
   warning: false
@@ -15,11 +16,24 @@ params:
     label: "MAG ID"
     value: "TI2_MAGScoT_cleanbin_000096"
   cycle_id:
-    label: "Replicate ID"
-    value: 1
+    label: "Cycle ID"
+    value: 2
+  phase_id:
+    label: "Phase ID"
+    value: "initial"
 ---
 # Description
-This document was generated directly from a quarto markdown file that contains the code for the analysis. To view the code, please visit the membrane cleaning github repository or request it from the author of this file.
+```{r}
+# Test output for cycle_id
+print(params$mag_id)
+print(params$cycle_id)
+print(params$phase_id)
+```
+
+This document was generated directly from a quarto markdown file that contains
+the code for the analysis. To view the code, please visit the membrane cleaning
+project github repository or request it from the author of this file.
+
 ```{r loading libraries, warning=F, message = F}
 # tidyverse-friendly packages
 library(tidyverse)
@@ -40,16 +54,12 @@ library(sva) # Must be loaded AFTER tidySummarizedExperiment as there is a clash
 library(DESeq2)
 ```
 ## Data 
-This analysis focuses on the MAG `r params$mag_id`` which represents the Geobacter genus. We hereafter refer to this as "Geobacter MAG". For this analysis, we require the following information:
 
-- Raw counts of all features/transcripts
-- List and annotation of all transcripts that belong to Geobacter
-- Sample information table
 
 ```{r load_MAG_data}
 mag_id <- params$mag_id
 
-bakta2MAG_path <- '/ibex/user/naras0c/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
+bakta2MAG_path <- '/ibex/scratch/projects/c2188/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
 
 bakta2MAG <- sprintf('ssh ibex "cat %s"', bakta2MAG_path ) %>%   
   pipe() %>%  
@@ -57,17 +67,27 @@ bakta2MAG <- sprintf('ssh ibex "cat %s"', bakta2MAG_path ) %>%
 
 Bakta_IDs_of_interest <- filter(bakta2MAG, MAG_ID %in% c(mag_id)) %>% pull(Bakta_ID)
 ```
+This analysis focuses on the MAG `r params$mag_id` for membrane cleaning cycle
+`r params$cycle_id` which represents taxa with the following information:
+```{r load_MAG_information}
+read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/dereplicated_refined_MAG_information.tsv") %>% 
+  separate(genome, into = c("MAG"), sep = '\\.') %>% 
+  filter(MAG == mag_id) %>% 
+  t() %>% 
+  knitr::kable()
+```
 
 ```{r load_sample_information}
 cycle_id = params$cycle_id
+phase_id = params$phase_id
 
 sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
   mutate(sample_ID = paste(sample, lane, sep = '_'),
          lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
   select(sample_ID, cycle = replicate, everything(), -sample, -R1, -R2) %>% 
-  filter(cycle == cycle_id)
+  filter(cycle == cycle_id, phase == phase_id)
 
-annotation_folder <- '/ibex/user/naras0c/membrane_cleaning/output/annotation/all/bakta/'
+annotation_folder <- '/ibex/scratch/projects/c2188/membrane_cleaning/output/annotation/all/bakta/'
 
 MAG_annotation <- 
   sprintf('ssh ibex "cat %s"', paste(annotation_folder, mag_id, paste0(mag_id, ".tsv"), sep = '/')) %>%  
@@ -144,7 +164,18 @@ combat_counts <-
                           .transcript = feature)
 ```
 ### Housekeeping gene (HKG) evaluation
-The genes in @tbl-hkg_list are considered housekeeping genes and are evaluated for their suitability to be used for scaling the data.
+The genes in @tbl-hkg_list are considered housekeeping genes and are evaluated
+for their suitability to be used for scaling the data. @tbl-hkg_genes_count shows the 
+statistical evaluation of the housekeeping genes that were detected within the MAG and 
+@fig-hkg_expression_conditions visualises the expression of those housekeeping
+genes. 
+
+The HKG with the lowest coefficient of variation (cv) as the reference
+housekeeping gene. Equivalent evaluation was conducted for ComBat-seq normalised
+data (@tbl-hkg_genes_combat) reveals that the ComBat batch correction procedure
+significantly reduced the variability between HKGs. Similarly, the least
+variable gene is automatically selected as the reference HKG.
+  
 ```{r list_housekeeping_genes}
 housekeeping_genes <- c("gyrA",
                         "gyrB",
@@ -291,16 +322,7 @@ hkg_combat_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(r
                           .sample = sample,
                           .transcript = feature)
 ```
-In general, there is a high variability for the all the housekeeping genes (HKG)
-that we evaluated (@fig-hkg_expression_conditions), which may not make them
-suitable to be used as a reference for scaling. @tbl-hkg_genes_count summarises
-the variability of HKGs across all samples. However, if we must make a choice,
-we select the HKG with the lowest coefficient of variation (cv) as the reference
-housekeeping gene. Equivalent evaluation was conducted for ComBat-seq normalised
-data (@tbl-hkg_genes_combat) reveals that the ComBat batch correction procedure
-significantly reduced the variability between HKGs. Similarly, the least
-variable gene is automatically selected as the reference HKG. 
-
+ 
 ## Evaluation of data
 ```{r initiate_plot_lists}
 # Initiate lists
@@ -641,30 +663,21 @@ p.hm[[4]]
 ```
 
 Dimensionality reduction using principal component analysis (PCA; @fig-pca) and
-multi-dimensional scaling (MDS; @fig-mds) show that there is no clustering
-solely based on condition in the raw counts and in the scaled/normalised
-data. It can be observed that the housekeeping gene (HKG) -based scaling creates
-the most effect when applied to the raw and ComBat-seq normalised counts. It
-must be noted that this pattern is *not* observed when performing the same
-analysis of the entire transcriptome (i.e. not just isolating Geobacter
-transcripts).
-
-The boxplots (@fig-boxplot) display the effect of the various normalisation and
+multi-dimensional scaling (MDS; @fig-mds) show the clustering of samples based
+on condition in the raw counts and in the different scaled/normalised. The
+boxplots (@fig-boxplot) display the effect of the various normalisation and
 scaling procedures applied to the raw counts. The density plots
-(@fig-density_plot) indicates that the scaling using HKG drastically changes the
-distribution of the data, such that the multi-modal nature of the data is
-further amplified.
+(@fig-density_plot) shows the distrubution of the raw and scaled counts.
 
 ## Differential expression analysis
-Differential expression (DE) analysis is separated into initial and backflush flow to
-delineate the differentially expressed genes stemming from each part of the
-experiment. Transcripts that have a count of at least one read in at least 70%
-of the samples are considered sufficiently abundant for downstream DE analysis.
-The model applied for DE tests is `~condition + cycle + lane`. Specifically,
-we compute the contrast between the true biological conditions of interest (i.e.
-treatment vs control) while "removing" technical differences `cycle` and
+Differential expression (DE) contrasts are separated into initial and backflush
+flow. Transcripts that have a count of at least one read in at least 70% of the
+samples are considered sufficiently abundant for downstream DE analysis. The
+model applied for DE tests is `~condition + lane`. Specifically, we compute the
+contrast between the true biological conditions of interest (i.e. treatment vs
+control) while "removing" technical differences stemming from the sequencing
 `lane` from the model, also known as (modelling out). DE is performed using four
-different methods: 
+different methods:
 
 1. EdgeR using quasi-likelihood tests (QLT) 
 2. EdgeR using likelihood ratio (LR) tests 
@@ -672,8 +685,8 @@ different methods:
 4. DESeq2
 
 Each of these methods are applied to the raw counts and the three different
-normalisation/scaling methods, i.e. i) ComBat-seq, ii) HKG and iii) ComBat-seq + HKG.
-This results in a total of 16 different DE results. 
+normalisation/scaling methods, i.e. i) ComBat-seq, ii) HKG and iii) ComBat-seq +
+HKG. This results in a total of 16 different DE results.
 
 The DE results were consolidated based on the following criteria: 
 
@@ -701,101 +714,105 @@ expr_list <- list("raw" = counts, "combat" = combat_counts, "hkg" = hkg_counts, 
 ```
 ```{r function_de}
 ## Function: Perform all DE analysis methods on given tables/normalisations including different phases
-compute_DE_genes <- function(expr_list, phase_value = "normal"){ 
+compute_DE_genes <- function(expr_list){ 
   
   for (i in 1:length(expr_list)){ 
     
     expr_obj <-
       expr_list[[i]] %>% 
-      filter(phase == {{ phase_value }}) %>% 
       keep_abundant(minimum_counts = 1) 
     
     expr_source <- names(expr_list)[i]
     
-    tmp_de_res <-  
-     
-       expr_obj %>% 
-      # edgeR QLT
-      test_differential_abundance(
-        ~ condition + lane,
-        method = "edgeR_quasi_likelihood",
-        prefix = paste0(expr_source, "_", "edgerQLT_")
-      ) %>%
+    if (expr_obj %>% as.tibble() %>% select(sample) %>% distinct() %>% nrow() > 3) { 
+      
+      tmp_de_res <-   
+        
+        expr_obj %>%  
+        # edgeR QLT 
+        test_differential_abundance( 
+          ~ condition + lane, 
+          method = "edgeR_quasi_likelihood", 
+          prefix = paste0(expr_source, "_", "edgerQLT_") 
+          ) %>%
     
-      # edgeR LRT
-      test_differential_abundance(
-        ~ condition + lane,
-        method = "edgeR_likelihood_ratio",
-        prefix = paste0(expr_source, "_", "edgerLR_")
-      ) %>%
-    
-      # limma-voom
-      test_differential_abundance(
-        ~ condition + lane,
-        method = "limma_voom",
-        prefix = paste0(expr_source, "_", "voom_")
-      ) 
-    
-    ## DESeq2
-    tmp_de_res <-  
-      expr_obj %>% 
-      as_tibble() %>% 
-      mutate(counts = round(counts)) %>% 
-      as_SummarizedExperiment(.sample = sample, 
-                              .abundance = counts,
-                              .transcript = feature) %>% 
-      test_differential_abundance(
-        ~ condition + lane,
-        method = "DESeq2",
-        prefix = paste0(expr_source, "_", "DESeq2_")
-        ) %>% 
-      as_tibble() %>% 
-      select(contains("DESeq2_")) %>% 
-      bind_cols(tmp_de_res %>% as_tibble(), .) %>%  
-      as_SummarizedExperiment(.sample = sample,
-                              .abundance = counts,
-                              .transcript = feature)
-     
-    ## Now join the tables 
-    if (i == 1){
-      de_res <- 
-        tmp_de_res %>% 
+        # edgeR LRT
+        test_differential_abundance(
+          ~ condition + lane,
+          method = "edgeR_likelihood_ratio",
+          prefix = paste0(expr_source, "_", "edgerLR_")
+        ) %>%
+      
+        # limma-voom
+        test_differential_abundance(
+          ~ condition + lane,
+          method = "limma_voom",
+          prefix = paste0(expr_source, "_", "voom_")
+        )  
+      ## DESeq2 
+      
+      tmp_de_res <-   
+        expr_obj %>% 
         as_tibble() %>% 
-        distinct() %>%   
-        select(-c(".feature",   
-                  ".sample", 
-                  "counts", 
-                  "sample", 
-                  "SampleName", 
-                  "condition", 
-                  "phase", 
-                  "cycle", 
-                  "lane", 
-                  "Run", 
-                  ".abundant")) %>%  
-        distinct()
-    } else {
-      de_res <-  
-        full_join(de_res, 
-                  tmp_de_res %>% as_tibble() %>%   
-                    select(-c(".feature",   
-                              ".sample", 
-                              "counts", 
-                              "sample", 
-                              "SampleName", 
-                              "condition", 
-                              "phase", 
-                              "cycle", 
-                              "lane", 
-                              "Run", 
-                              ".abundant")) %>%  
-                    distinct(),  
-                  by = c("feature", "avgLength")) %>%   
-        distinct() 
-      } 
+        mutate(counts = round(counts)) %>% 
+        as_SummarizedExperiment(.sample = sample, 
+                                .abundance = counts,
+                                .transcript = feature) %>% 
+        test_differential_abundance(
+          ~ condition + lane,
+          method = "DESeq2",
+          prefix = paste0(expr_source, "_", "DESeq2_")
+          ) %>% 
+        as_tibble() %>% 
+        select(contains("DESeq2_")) %>% 
+        bind_cols(tmp_de_res %>% as_tibble(), .) %>%  
+        as_SummarizedExperiment(.sample = sample,
+                                .abundance = counts,
+                                .transcript = feature)
+      
+      
+      ## Now join the tables  
+      if (i == 1){ 
+        de_res <-  
+          tmp_de_res %>% 
+          as_tibble() %>% 
+          distinct() %>%   
+          select(-c(".feature",   
+                    ".sample", 
+                    "counts", 
+                    "sample", 
+                    "SampleName", 
+                    "condition", 
+                    "phase", 
+                    "cycle", 
+                    "lane", 
+                    "Run", 
+                    ".abundant")) %>%  
+          distinct() 
+        } else { 
+          de_res <-  
+            full_join(de_res,  
+                      tmp_de_res %>% as_tibble() %>%    
+                        select(-c(".feature",    
+                                  ".sample", 
+                                  "counts", 
+                                  "sample", 
+                                  "SampleName", 
+                                  "condition", 
+                                  "phase", 
+                                  "cycle", 
+                                  "lane", 
+                                  "Run", 
+                                  ".abundant")) %>%   
+                        distinct(),  
+                      by = c("feature", "avgLength")) %>%   
+            distinct()  
+          
+          }  
+    } else {(print("No results"))} 
   } 
-  return(de_res)
-  }
+  return(de_res) 
+}
 ```
 
 ```{r function_expression_consistency}
@@ -870,21 +887,27 @@ compute_composite_DE_results <- function(de_res){
 }
 ```
 
-```{r}
-de_norm <- compute_DE_genes(expr_list = expr_list, phase = "normal")
-comp_de_norm <- compute_composite_DE_results(de_norm)
-```
-```{r}
-de_bflush <- compute_DE_genes(expr_list = expr_list, phase = "backflush")
-comp_de_bflush <- compute_composite_DE_results(de_bflush)
-```
-```{r write_full_table, eval = F}
-write_tsv(comp_de_norm, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_initial.tsv")
-write_tsv(comp_de_bflush, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results_backflush.tsv")
+```{r compute_de}
+de_dat <- compute_DE_genes(expr_list = expr_list)
 
+if(is.null(de_dat)){   
+  print("No results, skipping computation of composite p-values.") 
+  } else {  
+    de_dat <- compute_composite_DE_results(de_dat) 
+    }
 ```
-```{r write_topgenes_table, eval = F}
-comp_de_norm %>% 
+
+```{r write_full_table, eval = F}
+write_tsv(de_dat, 
+          paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/", 
+                 mag_id, 
+                 "-cycle_",  cycle_id, 
+                 "-", phase_id,
+                 "differential_expression_results.tsv")
+          ) 
+)
+
+de_dat %>% 
   filter(composite_p_val_fisher_fdr <= 0.05 & 
            significant_proportion > 0.5 & 
            combat_DESeq2_log2FoldChange >= abs(log2(2))) %>% 
@@ -892,28 +915,17 @@ comp_de_norm %>%
   left_join(MAG_annotation, by = "feature") %>% 
   bind_cols(phase = "initial") %>% 
   select(feature, phase, everything()) %>% 
-  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-2FC_0.05FDR_withAnnotation.tsv")
-  
-comp_de_bflush %>% 
-  filter(composite_p_val_fisher_fdr <= 0.05 & 
-           significant_proportion > 0.5 & 
-           combat_DESeq2_log2FoldChange >= abs(log2(2))) %>% 
-  select(feature, composite_p_val_fisher, composite_p_val_fisher_fdr, significant_proportion, raw_edgerQLT_logFC) %>% 
-  left_join(MAG_annotation, by = "feature") %>% 
-  bind_cols(phase = "backflush") %>% 
-  select(feature, phase, everything()) %>% 
-  write_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/differential_expression_results-2FC_0.05FDR_withAnnotation.tsv", append = T)
+  write_tsv(paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/", 
+                   mag_id, 
+                   "-cycle_", cycle_id, 
+                   "-", phase_id,
+                   "-differential_expression_results-2FC_0.05FDR_withAnnotation.tsv")
+  )
 ```
 
 ```{r get_top_genes}
-topgenes_norm <- 
-  comp_de_norm %>% 
-  arrange(composite_p_val_fisher) %>%
-  head(10) %>%
-  pull(feature) 
-
-topgenes_bflush <- 
-  comp_de_bflush %>% 
+topgenes <- 
+  de_dat %>% 
   arrange(composite_p_val_fisher) %>%
   head(10) %>%
   pull(feature) 
@@ -927,91 +939,83 @@ topgenes_bflush <-
 #|   - "Backflush" 
 #| layout-ncol: 1
 counts %>%  
-  full_join(comp_de_norm %>% select(feature, contains("raw_"), composite_p_val_fisher, composite_p_val_fisher_fdr), by = "feature") %>% 
+  full_join(de_dat %>% select(feature, contains("raw_"), composite_p_val_fisher, composite_p_val_fisher_fdr), by = "feature") %>% 
   mutate(log10_composite_p_val_fisher = log10(composite_p_val_fisher)) %>% 
   pivot_transcript(.transcript = .feature) %>%
   filter(!is.na(raw_edgerQLT_logFC)) %>% 
   mutate(significant = composite_p_val_fisher_fdr <= 0.05 & abs(raw_edgerQLT_logFC) >= log2(2)) %>% 
-  mutate(symbol = ifelse(.feature %in% topgenes_norm, as.character(.feature), "")) %>% 
+  mutate(symbol = ifelse(.feature %in% topgenes, as.character(.feature), "")) %>% 
   ggplot(aes(x = raw_edgerQLT_logFC, y = -log10_composite_p_val_fisher, label = symbol)) +
   geom_point(aes(color = significant, size = significant)) +
   geom_text_repel() +
   theme_minimal() +
   scale_color_manual(values = c("black", "#e11f28")) +
   scale_size_discrete(range = c(1, 2))
+```
+```{r prepare_plot_annotation_data}
+# This annotation data stores the necessary values to be incoroporated into
+# plots. These include composite pvalues (to indicate significance) and maximum
+# count values for each feature (for the y-position mapping of the pvalue bars
+# in the plot.)
 
-counts %>%  
-  full_join(comp_de_bflush %>% select(feature, contains("raw_"), composite_p_val_fisher, composite_p_val_fisher_fdr), by = "feature") %>% 
-  mutate(log10_composite_p_val_fisher = log10(composite_p_val_fisher)) %>% 
-  pivot_transcript(.transcript = .feature) %>%
-  filter(!is.na(raw_edgerQLT_logFC)) %>% 
-  mutate(significant = composite_p_val_fisher_fdr <= 0.05 & abs(raw_edgerQLT_logFC) >= log2(2)) %>% 
-  mutate(symbol = ifelse(.feature %in% topgenes_norm, as.character(.feature), "")) %>% 
-  ggplot(aes(x = raw_edgerQLT_logFC, y = -log10_composite_p_val_fisher, label = symbol)) +
-  geom_point(aes(color = significant, size = significant)) +
-  geom_text_repel() +
-  theme_minimal() +
-  scale_color_manual(values = c("black", "#e11f28")) +
-  scale_size_discrete(range = c(1, 2))
-
+plot_annotation_dat <-  
+  MAG_annotation %>%  
+  inner_join(de_dat, by = "feature") %>%  
+  left_join(counts %>% as_tibble(), by = "feature") %>%  
+  mutate(gene_name = coalesce(gene_symbol, gene_function)) %>%  
+  # Add a column to check for uniqueness 
+  mutate(is_unique = !duplicated(gene_name) & !duplicated(gene_name, fromLast = TRUE)) %>%
+  # Modify non-unique values by appending from append_col
+  mutate(gene_name = if_else(is_unique, gene_name, paste0(gene_name, ": ", feature))) %>%
+  # Optionally remove the helper column 
+  select(-is_unique) %>%  
+  select(feature, gene_name, gene_function, composite_p_val_fisher_fdr, condition, counts) %>%
+  distinct() %>% 
+  mutate(group1 = "control", group2 = "treatment",
+         fisher_fdr_round = round(composite_p_val_fisher_fdr, 5)) %>% 
+  group_by(feature) %>% 
+  mutate(ypos = max(counts)) %>% 
+  select(-counts) %>%  
+  distinct()
 ```
 
-
-```{r visualise_stripchart}
+```{r}
 #| label: fig-topgenes
 #| fig-cap: "Stripchart of the most significantly expressed genes." 
-#| fig-subcap:
-#|   - "Initial flow"
-#|   - "Backflush" 
 #| layout-ncol: 1
 
 counts %>%
 
   # extract counts for top differentially expressed genes
-  filter(feature %in% topgenes_norm) %>%
-
-  # make faceted stripchart
-  ggplot(aes(x = condition, y = counts + 1, fill = condition, group = condition)) +
-  geom_boxplot() +
-  geom_jitter() +
-  facet_wrap(~feature) +
-  scale_y_log10() +
-  theme_minimal()
-
-counts %>%
-
-  # extract counts for top differentially expressed genes
-  filter(feature %in% topgenes_bflush) %>%
-
-  # make faceted stripchart
-  ggplot(aes(x = condition, y = counts + 1, fill = condition, group = condition)) +
-  geom_boxplot() +
-  geom_jitter() +
-  facet_wrap(~feature) +
-  scale_y_log10() +
-  theme_minimal()
+  filter(feature %in% topgenes) %>%
+  left_join(plot_annotation_dat, by = c("feature","condition")) %>% 
+  ggplot(aes(x = condition, y = counts + 1, 
+               fill = condition, group = condition)) +
+    geom_violin(colour = NA, alpha = 0.25) +
+    geom_boxplot(colour = "gray75", alpha = 0.25, width = 0.2) +
+    geom_jitter(aes(colour = condition), alpha = 0.25, ) +
+    scale_y_log10() +
+    theme_minimal() +
+    add_pvalue(data = plot_annotation_dat %>% filter(feature %in% topgenes), 
+               label = "Fisher FDR = {fisher_fdr_round}", 
+               y.position = "ypos", 
+               bracket.nudge.y = 0.1) +
+    facet_wrap(~gene_name, ncol = 3) 
 ```
 
 ## Biofilm formation
 Biofilm formation is a complex process and there is vast amounts of literature
 covering it. Two methods were employed to search for biofilm-related genes. 
 
-The first method was using a curated structured database of biofilm-related
-proteins: https://biofilms.biosim.pt/. This method failed as it did not match
-against any of the genes within our dataset.
+We use keywords related to biofilm formation and search them against our gene
+annotations. These keywords include: "Biofilm", "Quorum sensing", "Adhesion",
+"Exopolysaccharide", "Motility", "Flagella", "Pili", "Extracellular" and
+"Matrix". *DISCLAIMER*: These keywords were collected via a shallow literature
+search and with ChatGPT.
 
-Next, we use keywords related to biofilm formation and search them against our
-gene annotations. These keywords include: "Biofilm", "Quorum sensing",
-"Adhesion", "Exopolysaccharide", "Motility", "Flagella", "Pili", "Extracellular"
-and "Matrix". *DISCLAIMER*: These keywords were collected via a shallow literature 
-search and with ChatGPT. 
+The relevant genes are displayed in @fig-biofilm_genes.
 
-The keyword based search yielded a total of 28 genes of which a majority of them
-were related to "pili" and "flagella". Out of those, nine of them appeared to be
-significant and had an absolute fold-change \leq 2. Those genes appear to be
-downregulated in the treatment samples (@fig-biofilm_genes).
-
-```{r biofilm_symbols, eval = F}
+```{r biofilm_genes}
 ## Source table from Biofilm Structural Database
 #biofilm_genes <- 
 #read_csv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/biofilms-database-2023-12-13.csv', comment = "#") %>% 
@@ -1061,78 +1065,39 @@ biofilm_genes <- c("fimH", "flp", "pilA", "bap", "icaA", "icaB", "icaC", "icaD",
                    "fli", "mot", "cheA", "cheY", "fnbA", "fnbB",
                    "clfA", "clfB", "fib", "epbs", "eno", "cna")
 
-
-MAG_annotation %>% filter(gene_symbol %in% biofilm_genes) %>% 
-  filter(!is.na(gene_symbol)) %>% inner_join(comp_de_norm, by = "feature") %>% 
-  left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
-  filter(counts > 1) %>% 
-# make faceted stripchart
-  ggplot(aes(x = condition, y = counts + 1, fill = condition, group = condition)) +
-  geom_boxplot() +
-  geom_jitter() +
-  facet_wrap(~feature) +
-  scale_y_log10() +
-  theme_minimal()
-```
-
-```{r biofilm_keywords}
 keywords <- c("Biofilm", "Quorum sensing", "Adhesion", "Exopolysaccharide", "Motility", "Flagella", "Pili", "Extracellular", "matrix")
 
-# Creating a regex pattern from the keywords
 pattern <- paste(keywords, collapse = "|")
 ```
 
-```{r}
-#| label: fig-biofilm_genes
-#| fig-cap: "Strip-violin-chart of the most significantly expressed biofilm-related genes." 
+```{r fig_biofilm_genes}
+#| label: fig-biofilm_genes_initial
+#| fig-cap: "Strip-violin-chart of the most significantly expressed biofilm-related genes in the initial flow." 
 #| fig-height: 7
+top_biofilm_genes_table <- 
+  counts %>%
 
-annot_dat <- 
-  MAG_annotation %>% 
-  filter(grepl(pattern, gene_function, ignore.case = TRUE)) %>% 
-  inner_join(comp_de_norm, by = "feature") %>% 
-  left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
+  # extract counts for top differentially expressed genes
+  left_join(plot_annotation_dat, by = c("feature","condition")) %>%
+  filter(grepl(pattern, gene_function, ignore.case = TRUE)) %>%
+  left_join(de_dat %>% select(-composite_p_val_fisher_fdr), by = c("feature")) %>%  
   filter(counts > 1 & composite_p_val_fisher_fdr <= 0.05 & abs(combat_edgerQLT_logFC) >= abs(log2(2)) & significant_proportion)  %>% 
-  mutate(gene_name = coalesce(gene_symbol, gene_function)) %>% 
-      # Add a column to check for uniqueness
-  mutate(is_unique = !duplicated(gene_name) & !duplicated(gene_name, fromLast = TRUE)) %>%
-  # Modify non-unique values by appending from append_col
-  mutate(gene_name = if_else(is_unique, gene_name, paste0(gene_name, ": ", feature))) %>%
-  # Optionally remove the helper column
-  select(-is_unique) %>% 
-  select(feature, gene_name, composite_p_val_fisher_fdr, condition, counts) %>%
-  distinct() %>%
-  mutate(group1 = "control", group2 = "treatment",
-         composite_p_val_fisher_fdr = round(composite_p_val_fisher_fdr, 5)) %>%
-  group_by(feature) %>% 
-  mutate(ypos = max(counts)) %>% 
-  select(-counts) %>% 
-  distinct()
+  as_tibble() %>% 
+  arrange(composite_p_val_fisher_fdr)
 
-MAG_annotation %>% 
-  filter(grepl(pattern, gene_function, ignore.case = TRUE)) %>% 
-  inner_join(comp_de_norm, by = "feature") %>% 
-  left_join(combat_counts %>% as_tibble(), by = "feature") %>% 
-  filter(counts > 1 & composite_p_val_fisher_fdr <= 0.05 & abs(combat_edgerQLT_logFC) >= abs(log2(2)) & significant_proportion)  %>% 
-  mutate(gene_name = coalesce(gene_symbol, gene_function)) %>% 
-    # Add a column to check for uniqueness
-  mutate(is_unique = !duplicated(gene_name) & !duplicated(gene_name, fromLast = TRUE)) %>%
-  # Modify non-unique values by appending from append_col
-  mutate(gene_name = if_else(is_unique, gene_name, paste0(gene_name, ": ", feature))) %>%
-  # Optionally remove the helper column
-  select(-is_unique) %>% 
-  group_by(feature) %>% 
-  mutate(ypos = max(counts)) %>% 
-  ungroup() %>% 
-  mutate(cycle = as.character(cycle)) %>% 
+top_biofilm_genes_table %>% 
   ggplot(aes(x = condition, y = counts + 1, 
-             fill = condition, group = condition)) +
-  geom_violin(colour = NA, alpha = 0.5) +
-  geom_boxplot(colour = "gray75", alpha = 0.25, width = 0.1) +
-  geom_jitter(aes(colour = condition, shape = cycle), alpha = 0.25, ) +
-  facet_wrap(~gene_name) +
-  scale_y_log10() +
-  theme_minimal() +
-  add_pvalue(data = annot_dat, label = "Fisher FDR = {composite_p_val_fisher_fdr}", y.position = "ypos", bracket.nudge.y = 0.1) +
-  facet_wrap(~gene_name, ncol = 3) 
+               fill = condition, group = condition)) +
+    geom_violin(colour = NA, alpha = 0.25) +
+    geom_boxplot(colour = "gray75", alpha = 0.25, width = 0.2) +
+    geom_jitter(aes(colour = condition), alpha = 0.25, ) +
+    scale_y_log10() +
+    theme_minimal() +
+    add_pvalue(data = plot_annotation_dat %>% filter(feature %in% unique(top_biofilm_genes_table$feature)), 
+               label = "Fisher FDR = {fisher_fdr_round}", 
+               y.position = "ypos", 
+               bracket.nudge.y = 0.1) +
+    facet_wrap(~gene_name, ncol = 3) 
 ```
+
+
