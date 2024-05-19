@@ -28,7 +28,7 @@ rule catbat_classification:
         
         # Run program on new folder with corrected fasta files
         mkdir -p catbat
-	CAT bins -b {input.bin_folder}/fixed_fasta -d {params.db_path} -t {params.tx_path} -n {threads} -s fasta -o catbat/{wildcards.db_name}/BAT
+	CAT bins --force -b {input.bin_folder}/fixed_fasta -d {params.db_path} -t {params.tx_path} -n {threads} -s fasta -o catbat/{wildcards.db_name}/BAT
 
         touch {output.donefile}
 	"""

@@ -14,7 +14,7 @@ SMK_CLUSTER_ARGS="sbatch -p {cluster.partition} -N {cluster.nodes} -n {cluster.n
 
 # Ativate snakemake
 #source ~/miniconda3/bin/activate snakemake
-module load snakemake
+module load snakemake/7.32.3
 
 case "${SMK_ARG}" in
     "--dry-run") echo "Performing dry-run"

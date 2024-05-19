@@ -21,7 +21,7 @@ input_dir = os.path.join("/ibex/scratch/projects/c2188/membrane_cleaning/output/
 
 ## Define output directory
 #output_dir = os.path.join("/ibex/scratch/projects/c2188/membrane_cleaning/output/annotation_2", condition)
-output_dir = os.path.join("/ibex/user/naras0c/membrane_cleaning/output/annotation_2", condition)
+output_dir = os.path.join("/ibex/user/naras0c/membrane_cleaning/output/annotation_gtdb_onlyOfficial", condition)
 
 ## Get path to directory containing all the bins
 bin_directory = os.path.join(input_dir, "dereplicated_bins/dereplicated_genomes")
