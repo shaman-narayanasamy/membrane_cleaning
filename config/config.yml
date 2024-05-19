@@ -35,6 +35,7 @@ catbat:
     tx_path:
       gtdb: "/ibex/reference/KSL/cat/20231120/20231120_CAT_gtdb/tax"
       nr: "/ibex/reference/KSL/cat/20231120/20231120_CAT_nr/tax"
+    catpack_script: "/home/naras0c/repositories/github/CAT_pack/CAT_pack/CAT_pack"
 
 trimmomatic:
     adapters_path: "/ibex/scratch/projects/c2188/membrane_cleaning/MT/adapters.fa"

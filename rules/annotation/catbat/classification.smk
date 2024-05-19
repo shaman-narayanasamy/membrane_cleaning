@@ -42,7 +42,8 @@ rule catbat_summary:
         donefile = "catbat/{db_name}/catbat_summary.done"
     params: 
         db_path=lambda wildcards: config['catbat']['db_path'][wildcards.db_name],
-        tx_path=lambda wildcards: config['catbat']['tx_path'][wildcards.db_name]
+        tx_path=lambda wildcards: config['catbat']['tx_path'][wildcards.db_name],
+        catpack_script=config['catbat']['catpack_script']
     conda: 
         "../../../envs/catbat_env.yml"
     container:
@@ -51,7 +52,7 @@ rule catbat_summary:
     log: "catbat/logs/{db_name}_catbat_summary.txt"
     shell: 
         """        
-        CAT add_names -i {input.bin_classification} -o {output.bin_classification_names_added} -t {params.tx_path} --only_official
+        {params.catpack_script} add_names -i {input.bin_classification} -o {output.bin_classification_names_added} -t {params.tx_path} --only_official
 
         touch {output.donefile}
         """
