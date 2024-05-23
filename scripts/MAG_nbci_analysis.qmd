@@ -36,19 +36,21 @@ MAGs with multiple taxonomic assignments are considered to be ambiguous and are 
 
 ```{r read_drep_results}
 drep_table <- 
-  '/scratch/users/snarayanasamy/membrane_cleaning/output/dereplication/all/dereplicated_bins/data_tables/Widb.csv' %>% 
-  sprintf('ssh iris "cat %s"', .) %>% 
+  '/ibex/scratch/projects/c2188/membrane_cleaning/output/dereplication/all/dereplicated_bins/data_tables/Widb.csv' %>% 
+  sprintf('ssh ibex "cat %s"', .) %>% 
   pipe() %>% 
   read_csv() 
+  mutate(genome = str_replace_all(genome, ".fasta", "")) 
 ```
-```{r read_bat_results}
+```{r read_ncbi_results}
 bat_table <- 
-  '/mnt/lscratch/users/snarayanasamy/membrane_cleaning/output/annotation/all/catbat/BAT.bin2classification.names_added.txt' %>% 
-  sprintf('ssh iris "cat %s"', .) %>% 
+  '/ibex/scratch/projects/c2188/membrane_cleaning/output/annotation/all/catbat/BAT.bin2classification.names_added.txt' %>% 
+  sprintf('ssh ibex "cat %s"', .) %>% 
   pipe() %>% 
   read_tsv() %>% 
   rename(genome = `# bin`)
 ```
+
 ```{r load_sample_information, warning=F}
 sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
   mutate(sample_ID = paste(sample, lane, sep = '_'),
@@ -76,7 +78,7 @@ mag_info <-
 ```
 
 ```{r write_mag_info_table, eval = F}
-write_tsv(mag_info, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/dereplicated_refined_MAG_information.tsv")
+write_tsv(mag_info, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/dereplicated_refined_MAG_information-ncbi.tsv")
 ```
 ## Metagenomics assembled genomes (MAG)
 @fig-mag_stats shows the completeness statistics and the proportion of MAGs that
