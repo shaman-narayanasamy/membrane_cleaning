@@ -33,77 +33,6 @@ The following information is required for this analysis:
 
 MAGs with multiple taxonomic assignments are considered to be ambiguous and are excluded from downstream analyses. The `dRep` table and `CAT/BAT` tables are merged to combine the completeness information with taxonomic information.
 
-```{r read_drep_results}
-drep_table <- 
-  '/ibex/scratch/projects/c2188/membrane_cleaning/output/dereplication/all/dereplicated_bins/data_tables/Widb.csv' %>% 
-  sprintf('ssh ibex "cat %s"', .) %>% 
-  pipe() %>% 
-  read_csv() %>% 
-  mutate(genome = str_replace_all(genome, ".fasta", "")) 
-```
-```{r read_gtdb_results}
-bat_table <- 
-  '/ibex/user/naras0c/membrane_cleaning/output/annotation_gtdb_onlyOfficial/all/catbat/gtdb/BAT.bin2classification.txt' %>% 
-  sprintf('ssh ibex "cat %s"', .) %>% 
-  pipe() %>% 
-  read_tsv() %>% 
-  rename(genome = `# bin`) %>% 
-  separate(lineage, into = c("root", 
-                              "superkingdom", 
-                              "phylum", 
-                              "class",
-                              "order",
-                              "family",
-                              "genus",
-                              "species"),
-            sep = ";") %>% 
-  separate(superkingdom, sep = '__', into = c("tmp0", "superkingdom")) %>% 
-  separate(phylum, sep = '__', into = c("tmp0", "phylum")) %>% 
-  separate(class, sep = '__', into = c("tmp1", "class")) %>% 
-  separate(order, sep = '__', into = c("tmp2", "order")) %>% 
-  separate(family, sep = '__', into = c("tmp3", "family")) %>% 
-  separate(genus, sep = '__', into = c("tmp4", "genus")) %>% 
-  separate(species, sep = '__', into = c("tmp5", "species")) %>% 
-  select(-starts_with("tmp"), -root) %>% 
-  separate(`lineage scores (f: 0.30)`, into = c("root", 
-                              "superkingdom_score", 
-                              "phylum_score", 
-                              "class_score",
-                              "order_score",
-                              "family_score",
-                              "genus_score",
-                              "species_score"),
-            sep = ";") %>% 
-  mutate(genome = str_replace_all(genome, ".fasta", "")) %>% 
-  
-  filter(!duplicated(genome)) 
-```
-
-```{r load_sample_information, warning=F}
-sample_info <- read_tsv('~/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
-  mutate(sample_ID = paste(sample, lane, sep = '_'),
-         lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
-  select(sample_ID, everything(), -sample, -R1, -R2) 
-```
-
-```{r}
-mag_info <- 
-  inner_join(drep_table, bat_table, by = "genome") %>% 
-  select(genome, completeness, contamination, size, N50, completeness_metric, contamination_metric, superkingdom, phylum, class, order, family, genus, species, contains("_score"))
-```
-
-```{r write_mag_info_table, eval = F}
-write_tsv(mag_info, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/dereplicated_refined_MAG_information-gtdb.tsv")
-```
-## Metagenomics assembled genomes (MAG)
-@fig-mag_stats shows the completeness statistics and the proportion of MAGs that
-were successfully classified on each taxonomic level. Due to our stringent MAG
-refinement and selection process, it is generally expected that we retain
-relatively high-quality MAGs (@fig-mag_stats-1). However, only a small portion
-of those MAGs could be classified at the lower taxonomy levels, e.g. class and
-below (@fig-mag_stats-2). The larger number of "species" classified, is likely
-due to the presence of MAGs from previous studies deposited into the database.
-
 ```{r create_ordering}
 ## Create taxonomic order for downstream visualisation
 taxonomy_ordering <- c("superkingdom",
@@ -185,6 +114,7 @@ mag_info %>% filter(!is.na(species)) %>% filter(species != "no support")
 
 ```{r visualise_relab}
 ## Function: Visualise relative abundance
+counts_table = mg_counts
 plot_relab_all_samples <- function(counts_table, taxonomy = "genus"){ 
   taxonomy_sym <- sym(taxonomy)
 
@@ -194,15 +124,19 @@ plot_relab_all_samples <- function(counts_table, taxonomy = "genus"){
     summarise(count = sum(count)) %>% 
     ungroup() %>% 
     group_by(sample_ID) %>% 
+    filter(count >= 10000) %>% 
     mutate(total_count_sample = sum(count)) %>% 
     mutate(relab = count/total_count_sample) %>% 
     ungroup() %>% 
+    
     mutate(!!taxonomy_sym := ifelse(!!taxonomy_sym == "no support", NA, !!taxonomy_sym)) %>% 
     ggplot(aes(x = sample_ID, y = relab, fill = !!taxonomy_sym) ) +
     geom_bar(position = "stack", stat = "identity") +
     theme(axis.text.x = element_text(angle = 90),
           legend.position = "bottom")
 }
+
+plot_relab_all_samples(counts_table = mg_counts, taxonomy = "genus" )
 ```
 
 ## Metagenomics 
@@ -213,7 +147,7 @@ relative abundance plots (e.g. fig-mg_relab-4).
 
 ```{r prepare_mg_data}
 mg_counts <- 
-  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_MAG_counts.tsv") %>% 
+  read_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_MAG_counts.tsv") %>% 
   pivot_longer(cols = 
                  sample_info %>% select(sample_ID) %>% 
                  separate(sample_ID, into = "sample_ID", sep = "_") %>% 
@@ -223,7 +157,7 @@ mg_counts <-
   left_join(mag_info, by = c("MAG_ID" = "genome"))
 
 mg_tpm <- 
-  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_MAG_TPM_counts.tsv") %>% 
+  read_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_MAG_TPM_counts.tsv") %>% 
    pivot_longer(cols = 
                  sample_info %>% select(sample_ID) %>% 
                  separate(sample_ID, into = "sample_ID", sep = "_") %>% 

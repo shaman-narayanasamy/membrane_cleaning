@@ -9,6 +9,8 @@ execute:
   echo: false 
   warning: false
   message: false
+params:
+  mag_info: "/Users/naras0c/Work/data/membrane_cleaning/dereplicated_refined_MAG_information-ncbi.tsv"
 ---
 
 ```{r load_libraries}
@@ -32,56 +34,14 @@ The following information is required for this analysis:
 - Sample information table 
 
 MAGs with multiple taxonomic assignments are considered to be ambiguous and are excluded from downstream analyses. The `dRep` table and `CAT/BAT` tables are merged to combine the completeness information with taxonomic information.
-
-
-```{r read_drep_results}
-drep_table <- 
-  '/ibex/scratch/projects/c2188/membrane_cleaning/output/dereplication/all/dereplicated_bins/data_tables/Widb.csv' %>% 
-  sprintf('ssh ibex "cat %s"', .) %>% 
-  pipe() %>% 
-  read_csv() 
-  mutate(genome = str_replace_all(genome, ".fasta", "")) 
+```{r read_mag_info}
+mag_info <- 
+  read_tsv(params$mag_info)
 ```
-
-```{r load_sample_information, warning=F}
-sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
-  mutate(sample_ID = paste(sample, lane, sep = '_'),
-         lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
-  select(sample_ID, everything(), -sample, -R1, -R2) 
-```
-```{r filter_out_duplicates}
-bat_table <- 
-  bat_table %>% 
-  filter(!duplicated(genome)) 
-```
-
-## Metagenomics assembled genomes (MAG)
-@fig-mag_stats shows the completeness statistics and the proportion of MAGs that
-were successfully classified on each taxonomic level. Due to our stringent MAG
-refinement and selection process, it is generally expected that we retain
-relatively high-quality MAGs (@fig-mag_stats-1). However, only a small portion
-of those MAGs could be classified at the lower taxonomy levels, e.g. class and
-below (@fig-mag_stats-2). The larger number of "species" classified, is likely
-due to the presence of MAGs from previous studies deposited into the database.
-
-```{r create_ordering}
-## Create taxonomic order for downstream visualisation
-taxonomy_ordering <- c("superkingdom",
-                       "phylum", 
-                       "class", 
-                       "order" ,
-                       "family",
-                       "genus",
-                       "species"  
-                       )
-```
-
-```{r visualise_mag_stats}
-#| label: fig-mag_stats
-#| fig-cap: "Metagenomic assembled genome (MAG) statistics." 
-#| fig-subcap:
-#|   - "Proportion of MAGs based on completeness metrics."
-#|   - "Proportion of MAGs successfully classified on different taxonomic levels." 
+## Expore the classification metrics
+```{r visualise_mag_stats_pie_completeness}
+#| label: fig-mag_stats_completeness
+#| fig-cap: "Metagenomic assembled genome (MAG) completeness statistics." 
 #| layout-ncol: 1
 mag_info %>% 
   select("completeness_metric") %>% 
@@ -93,8 +53,25 @@ mag_info %>%
   coord_polar("y") +
   geom_text(aes(label = count), position = position_stack(vjust = 0.5)) +
   theme_void() +
-  theme(legend.title = element_blank()) 
-
+  theme(legend.title = element_blank())
+```
+```{r visualise_mag_stats_pie_contamination}
+#| label: fig-mag_stats_contamination
+#| fig-cap: "Metagenomic assembled genome (MAG) contamination statistics." 
+#| layout-ncol: 1
+mag_info %>% 
+  select("contamination_metric") %>% 
+  group_by(contamination_metric) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+ ggplot(aes(x = "", y = count, fill = contamination_metric)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y") +
+  geom_text(aes(label = count), position = position_stack(vjust = 0.5)) +
+  theme_void() +
+  theme(legend.title = element_blank())
+```
+```{r visualise_mag_stats_bar}
 mag_info %>% 
   select( 
     c("genome", 
@@ -131,6 +108,7 @@ mag_info %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, 
                                            margin = margin(t = 5, r = 0, b = 0, l = 0)))
 ```
+## Explore the candidate bacteria of interest
 ```{r taxa_of_interest, eval = F}
 taxa_of_interest <- googlesheets4::read_sheet("https://docs.google.com/spreadsheets/d/1w5wCKSBxTwUp__m4_PcbmxbumGaY-9d90i75Gsb5DvQ/edit#gid=1591395475", sheet = "Taxa of interest")
 
@@ -142,30 +120,40 @@ inner_join(taxa_of_interest %>% select(phylum), mag_info, by = "phylum")
 
 mag_info %>% filter(!is.na(species)) %>% filter(species != "no support")
 ```
-```{r visualise_relab}
-## Function: Visualise relative abundance
-plot_relab_all_samples <- function(counts_table, taxonomy = "genus"){ 
-  taxonomy_sym <- sym(taxonomy)
+```{r read_mag_info}
+ mag_info <- 
+  mag_info %>% 
+  ## Remove only those MAGs that were highly contaminated
+  filter(contamination_metric != "very high") %>%  
+  filter(!is.na(phylum) | phylum != "no support" | genome == "TI2_MAGScoT_cleanbin_000096")
+```
 
-  counts_table %>% 
-    select(!!taxonomy_sym, sample_ID, count) %>%
-    group_by(!!taxonomy_sym, sample_ID) %>% 
-    summarise(count = sum(count)) %>% 
-    ungroup() %>% 
-    group_by(sample_ID) %>% 
-    filter(count >= 10000) %>% 
-    mutate(total_count_sample = sum(count)) %>% 
-    mutate(relab = count/total_count_sample) %>% 
-    ungroup() %>% 
-    
-    mutate(!!taxonomy_sym := ifelse(!!taxonomy_sym == "no support", NA, !!taxonomy_sym)) %>% 
-    ggplot(aes(x = sample_ID, y = relab, fill = !!taxonomy_sym) ) +
-    geom_bar(position = "stack", stat = "identity") +
-    theme(axis.text.x = element_text(angle = 90),
-          legend.position = "bottom")
-}
+```{r load_sample_information, warning=F}
+sample_info <- read_tsv('/Users/naras0c/Work/data/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
+  mutate(sample_ID = paste(sample, lane, sep = '_'),
+         lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
+  select(sample_ID, everything(), -sample, -R1, -R2) 
+```
 
-plot_relab_all_samples(counts_table = mg_counts, taxonomy = "genus" )
+## Metagenomics assembled genomes (MAG)
+@fig-mag_stats shows the completeness statistics and the proportion of MAGs that
+were successfully classified on each taxonomic level. Due to our stringent MAG
+refinement and selection process, it is generally expected that we retain
+relatively high-quality MAGs (@fig-mag_stats-1). However, only a small portion
+of those MAGs could be classified at the lower taxonomy levels, e.g. class and
+below (@fig-mag_stats-2). The larger number of "species" classified, is likely
+due to the presence of MAGs from previous studies deposited into the database.
+
+```{r create_ordering}
+## Create taxonomic order for downstream visualisation
+taxonomy_ordering <- c("superkingdom",
+                       "phylum", 
+                       "class", 
+                       "order" ,
+                       "family",
+                       "genus",
+                       "species"  
+                       )
 ```
 
 ## Metagenomics 
@@ -176,7 +164,7 @@ relative abundance plots (e.g. fig-mg_relab-4).
 
 ```{r prepare_mg_data}
 mg_counts <- 
-  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_MAG_counts.tsv") %>% 
+  read_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_MAG_counts.tsv") %>% 
   pivot_longer(cols = 
                  sample_info %>% select(sample_ID) %>% 
                  separate(sample_ID, into = "sample_ID", sep = "_") %>% 
@@ -184,17 +172,39 @@ mg_counts <-
                names_to = "sample_ID",
                values_to = "count") %>% 
   left_join(mag_info, by = c("MAG_ID" = "genome"))
-
-mg_tpm <- 
-  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_MAG_TPM_counts.tsv") %>% 
-   pivot_longer(cols = 
-                 sample_info %>% select(sample_ID) %>% 
-                 separate(sample_ID, into = "sample_ID", sep = "_") %>% 
-                 distinct() %>% pull(sample_ID),
-               names_to = "sample_ID",
-               values_to = "count") %>% 
-  left_join(mag_info, by = c("MAG_ID" = "genome"))
 ```
+
+```{r visualise_relab, fig.width=20}
+## Function: Visualise relative abundance
+counts_table <- mg_counts
+plot_relab_all_samples <- function(counts_table, 
+                                   taxonomy_1 = "phylum", 
+                                   taxonomy_2 = "genus"){ 
+  
+  taxonomy_sym_1 <- sym(taxonomy_1)
+  taxonomy_sym_2 <- sym(taxonomy_2)
+
+  counts_table %>% 
+    select(!!taxonomy_sym_1, !!taxonomy_sym_2, sample_ID, count, ) %>%
+    mutate(taxonomy = paste(!!taxonomy_sym_1, !!taxonomy_sym_2, sep = ":")) %>% 
+  
+    group_by(taxonomy, sample_ID) %>% 
+    summarise(count = sum(count)) %>% 
+    ungroup() %>% 
+    group_by(sample_ID) %>% 
+    mutate(total_count_sample = sum(count)) %>% 
+    mutate(relab = count/total_count_sample) %>% 
+    ungroup() %>% 
+    
+    mutate(taxonomy := ifelse(taxonomy == "no support", NA, taxonomy)) %>% 
+    ggplot(aes(x = sample_ID, y = relab, fill = taxonomy) ) +
+    geom_bar(position = "stack", stat = "identity") +
+    theme(axis.text.x = element_text(angle = 90),
+          legend.position = "right")
+}
+```
+
+
 
 ```{r generate_mg_relab_plot}
 mg_relab <- list()
@@ -203,7 +213,7 @@ for (i in 1:length(taxonomy_ordering)){
 }
 ```
 
-```{r visualise_mg_data}
+```{r visualise_mg_data, fig.width=20}
 #| label: fig-mg_relab
 #| fig-cap: "Metagenomics relative abundance based on different taxonomic levels." 
 #| fig-subcap:
@@ -241,19 +251,6 @@ bakta2MAG <- sprintf('ssh iris "cat %s"', bakta2MAG_path ) %>%
 ```{r read_transcriptomics_data}
 mt_counts <- 
   read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_counts.tsv") %>% 
-  select(Bakta_ID, contains("_L00")) %>% 
-  pivot_longer(cols = sample_info %>% pull(sample_ID),
-               names_to = "sample_ID",
-               values_to = "count") %>% 
-  group_by(Bakta_ID, sample_ID) %>% 
-  summarise(count = sum(count, na.rm = T)) %>% 
-  ungroup() %>% 
-  distinct() %>% 
-  left_join(bakta2MAG, by = "Bakta_ID") %>% 
-  left_join(mag_info, by = c("MAG_ID" = "genome"))
-
-mt_tpm <- 
-  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_TPM_counts.tsv") %>% 
   select(Bakta_ID, contains("_L00")) %>% 
   pivot_longer(cols = sample_info %>% pull(sample_ID),
                names_to = "sample_ID",

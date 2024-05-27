@@ -94,3 +94,11 @@ container were used instead of conda virtual environments.
         ├── preprocessing.smk
         └── quantification.smk
 ```
+
+## Miscellaneous items
+
+### Counting number of bins from each binning method and sample
+
+```{sh}
+find [CT]*/bins_not_filtered/concoct.zip -type l -print0 | xargs -0 -I{} sh -c 'echo -n "{}: "; unzip -l "$(readlink -f {})" | grep " files$"'
+```
