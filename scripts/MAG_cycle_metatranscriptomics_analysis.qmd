@@ -329,7 +329,12 @@ hkg_combat_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(r
                           .sample = sample,
                           .transcript = feature)
 ```
- 
+```{r initialise lists} 
+p.bp <- list()
+p.dp <- list()
+p.hm <- list()
+```
+
 ```{r boxplot_raw_counts}
 p.bp[[1]] <-  
   counts %>% as_tibble() %>%  
@@ -392,26 +397,6 @@ p.hm[[2]] <-
   add_tile(lane)
 ```
 
-```{r pca_hkg}
-p.pca[[3]] <- 
-  hkg_counts %>%
-  reduce_dimensions(method = "PCA") %>% 
-  pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = PC1, y = PC2, colour = as.character(condition), shape = phase)) +
-  geom_point() +
-  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
-  theme_minimal()
-```
-```{r mds_hkg}
-p.mds[[3]] <- 
-  hkg_counts %>%
-  reduce_dimensions(method = "MDS") %>% 
-  pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(condition), shape = phase)) +
-  geom_point() +
-  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
-  theme_minimal()
-```
 ```{r boxplot_hkg}
 p.bp[[3]] <- 
   hkg_counts %>% as_tibble() %>%   
@@ -447,26 +432,7 @@ p.hm[[3]] <-
   add_tile(condition) %>%
   add_tile(lane)
 ```
-```{r pca_combat_hkg}
-p.pca[[4]] <- 
-  hkg_combat_counts %>%
-  reduce_dimensions(method = "PCA") %>% 
-  pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = PC1, y = PC2, colour = as.character(condition), shape = phase)) +
-  geom_point() +
-  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
-  theme_minimal()
-```
-```{r mds_combat_hkg}
-p.mds[[4]] <- 
-  hkg_combat_counts %>%
-  reduce_dimensions(method = "MDS") %>% 
-  pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(condition), shape = phase)) +
-  geom_point() +
-  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
-  theme_minimal()
-```
+
 ```{r boxplot_combat_hkg}
 p.bp[[4]] <- 
   hkg_combat_counts %>% as_tibble() %>%  
@@ -503,34 +469,7 @@ p.hm[[4]] <-
   add_tile(lane)
 ```
 
-```{r plot_pca}
-#| label: fig-pca
-#| fig-cap: "Visualisation of principal component analysis (PCA) dimensionality reduction of unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
-#| fig-subcap:
-#|   - "Raw counts"
-#|   - "ComBat-seq" 
-#|   - "HKG" 
-#|   - "ComBat-seq + HKG" 
-#| layout-ncol: 2
-p.pca[[1]] 
-p.pca[[2]] 
-p.pca[[3]] 
-p.pca[[4]] 
-```
-```{r plot_mds}
-#| label: fig-mds
-#| fig-cap: "Visualisation of multi-dimensional scaling (MDS) dimensionality reduction of unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
-#| fig-subcap:
-#|   - "Raw counts"
-#|   - "ComBat-seq" 
-#|   - "HKG" 
-#|   - "ComBat-seq + HKG" 
-#| layout-ncol: 2
-p.mds[[1]] 
-p.mds[[2]] 
-p.mds[[3]] 
-p.mds[[4]] 
-```
+
 ```{r generate_boxplot}
 for (i in 1:length(p.bp)){
   if (i <= 3){
@@ -595,13 +534,6 @@ p.hm[[2]]
 p.hm[[3]] 
 p.hm[[4]] 
 ```
-
-Dimensionality reduction using principal component analysis (PCA; @fig-pca) and
-multi-dimensional scaling (MDS; @fig-mds) show the clustering of samples based
-on condition in the raw counts and in the different scaled/normalised. The
-boxplots (@fig-boxplot) display the effect of the various normalisation and
-scaling procedures applied to the raw counts. The density plots
-(@fig-density_plot) shows the distrubution of the raw and scaled counts.
 
 ## Differential expression analysis
 Differential expression (DE) contrasts are separated into initial and backflush
