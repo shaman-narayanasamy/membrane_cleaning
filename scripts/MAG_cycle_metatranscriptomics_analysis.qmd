@@ -3,8 +3,6 @@ title: "MAG-level metatranscriptomics analysis"
 author: "Shaman Narayanasamy"
 editor: source
 fig-cap-location: bottom
-project:
-  output-dir: render/
 format:
   pdf: default
 execute:
@@ -469,9 +467,9 @@ p.hm[[4]] <-
   add_tile(lane)
 ```
 
-
-```{r generate_boxplot}
+```{r generate_boxplot, eval = F}
 for (i in 1:length(p.bp)){
+  print(paste("Processing index:", i))
   if (i <= 3){
     p.bp[[i]] <- 
       p.bp[[i]] +  
@@ -485,6 +483,7 @@ for (i in 1:length(p.bp)){
        axis.text.x = element_text(angle = 90)
        )
   }
+  print(paste("Completed index:", i))
 }
 ```
 ```{r plot_boxplots}
