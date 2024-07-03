@@ -1,5 +1,5 @@
 ---
-title: "Prepare metatranscriptomics data"
+title: "Prepare data"
 author: "Shaman Narayanasamy"
 editor: source
 ---
@@ -86,6 +86,17 @@ mt_tpm <-
   write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_TPM_counts.tsv")
 
 rm(tmp)
+```
+
+#### Bakta 2 MAG mappings
+```{r load_MAG_data}
+bakta2MAG_path <- '/ibex/scratch/projects/c2188/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
+
+bakta2MAG <- sprintf('ssh ibex "cat %s"', bakta2MAG_path ) %>%   
+  pipe() %>%  
+  read_tsv(col_names = c("MAG_ID", "Bakta_ID"))
+
+write_tsv(bakta2MAG, "/Users/naras0c/Work/data/membrane_cleaning/bakta2MAG_mappings.tsv")
 ```
 
 ## Metagenomics

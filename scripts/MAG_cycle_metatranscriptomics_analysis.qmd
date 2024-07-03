@@ -17,7 +17,7 @@ params:
     value: "TI2_MAGScoT_cleanbin_000096"
   cycle_id:
     label: "Cycle ID"
-    value: 2
+    value: 1
   phase_id:
     label: "Phase ID"
     value: "initial"
@@ -46,6 +46,7 @@ library(GGally)
 library(tidyHeatmap)
 library(ggsignif)
 library(ggprism)
+library(kableExtra)
 
 # tidytranscriptomics-related packages
 library(tidybulk)
@@ -54,8 +55,6 @@ library(sva) # Must be loaded AFTER tidySummarizedExperiment as there is a clash
 library(DESeq2)
 ```
 ## Data 
-
-
 ```{r load_MAG_data}
 mag_id <- params$mag_id
 
@@ -70,18 +69,20 @@ Bakta_IDs_of_interest <- filter(bakta2MAG, MAG_ID %in% c(mag_id)) %>% pull(Bakta
 This analysis focuses on the MAG `r params$mag_id` for membrane cleaning cycle
 `r params$cycle_id` which represents taxa with the following information:
 ```{r load_MAG_information}
-read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/dereplicated_refined_MAG_information.tsv") %>% 
+read_tsv("/Users/naras0c/Work/data/membrane_cleaning/dereplicated_refined_MAG_information-ncbi.tsv") %>% 
   separate(genome, into = c("MAG"), sep = '\\.') %>% 
   filter(MAG == mag_id) %>% 
   t() %>% 
-  knitr::kable()
+  kbl() %>% 
+  kable_minimal()
 ```
 
 ```{r load_sample_information}
 cycle_id = params$cycle_id
 phase_id = params$phase_id
 
-sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
+sample_info <- 
+  read_tsv('/Users/naras0c/Work/data/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
   mutate(sample_ID = paste(sample, lane, sep = '_'),
          lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
   select(sample_ID, cycle = replicate, everything(), -sample, -R1, -R2) %>% 
@@ -98,7 +99,7 @@ MAG_annotation <-
 
 ```{r select_features_from_MAG}
 counts <- 
-  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_counts.tsv")
+  read_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_counts.tsv")
 
 counts <- 
   counts %>%  
@@ -158,7 +159,7 @@ combat_counts <-
   pivot_longer(cols = sample_info$sample_ID, names_to = "sample", values_to = "combat_counts") %>% 
   right_join(counts %>% as_tibble(), by = c("feature", "sample")) %>% 
   dplyr::select(-counts) %>% 
-  rename(counts = combat_counts) %>% 
+  dplyr::rename("counts" = "combat_counts") %>% 
   as_SummarizedExperiment(.abundance = counts,
                           .sample = sample,
                           .transcript = feature)
@@ -191,7 +192,11 @@ housekeeping_genes <- c("gyrA",
 ```{r}
 #| label: tbl-hkg_list
 #| tbl-cap: "List of housekeeping genes."
-housekeeping_genes %>% as_tibble() %>% rename(`housekeeping_gene_symbol` = value) %>% knitr::kable()
+housekeeping_genes %>% 
+  as_tibble() %>% 
+  dplyr::rename(`housekeeping_gene_symbol` = value) %>% 
+  kbl() %>% 
+  kable_minimal()
 ```
 ```{r show_hkg_information}
 #| label: tbl-hkg_genes_count
@@ -212,7 +217,8 @@ MAG_annotation %>%
   arrange(cv) %>% 
   left_join(MAG_annotation) %>% 
   select(gene_symbol, mean = mean_count, sd = sd_count, cv, `function` = gene_function) %>% 
-  knitr::kable(digits = 2, caption = "List of genes that could be used for houskeeping gene based normalisation. The mean and standard deviation (sd) are based on the raw read counts and the coefficient of variation (cv) represents the variation of these genes accross all samples and cycles. Lower cv represents less variation. Genes with the least variation should used as references in housekeeping gene normalisation.")
+  kbl() %>% 
+  kable_minimal()
 ```
 
 ```{r visualise_hkg_condition}
@@ -260,7 +266,7 @@ hkg_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(rownames
   pivot_longer(cols = sample_info$sample_ID, names_to = "sample", values_to = "hkg_counts") %>%  
   right_join(counts %>% as_tibble(), by = c("feature", "sample")) %>% 
   dplyr::select(-counts) %>% 
-  rename(counts = hkg_counts) %>% 
+  dplyr::rename(counts = hkg_counts) %>% 
   as_SummarizedExperiment(.abundance = counts,
                           .sample = sample,
                           .transcript = feature)
@@ -285,7 +291,8 @@ MAG_annotation %>%
   arrange(cv) %>% 
   left_join(MAG_annotation) %>% 
   select(gene_symbol, mean = mean_count, sd = sd_count, cv, `function` = gene_function) %>% 
-  knitr::kable(digits = 2, caption = "List of genes that could be used for houskeeping gene based normalisation. The mean and standard deviation (sd) are based on the raw read counts and the coefficient of variation (cv) represents the variation of these genes accross all samples and cycles. Lower cv represents less variation. Genes with the least variation should used as references in housekeeping gene normalisation.")
+  kbl() %>% 
+  kable_minimal()
 ```
 
 ```{r}
@@ -317,50 +324,12 @@ hkg_combat_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(r
   pivot_longer(cols = sample_info$sample_ID, names_to = "sample", values_to = "hkg_counts") %>%  
   right_join(counts %>% as_tibble(), by = c("feature", "sample")) %>% 
   dplyr::select(-counts) %>% 
-  rename(counts = hkg_counts) %>% 
+  dplyr::rename(counts = hkg_counts) %>% 
   as_SummarizedExperiment(.abundance = counts,
                           .sample = sample,
                           .transcript = feature)
 ```
  
-## Evaluation of data
-```{r initiate_plot_lists}
-# Initiate lists
-## List of PCA plots
-p.pca <- list() 
-
-## List of MDS plots
-p.mds <- list()
-
-## List of boxplots
-p.bp <- list()
-
-## List of density plots
-p.dp <- list()
-
-## List of density plots
-p.hm <- list()
-```
-```{r pca_raw_counts}
-p.pca[[1]] <- 
-  counts %>%
-  reduce_dimensions(method = "PCA") %>% 
-  pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = PC1, y = PC2, colour = as.character(condition), shape = phase)) +
-  geom_point() +
-  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
-  theme_minimal()
-```
-```{r mds_raw_counts}
-p.mds[[1]] <- 
-  counts %>%
-  reduce_dimensions(method = "MDS") %>% 
-  pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(condition), shape = phase)) +
-  geom_point() +
-  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
-  theme_minimal()
-```
 ```{r boxplot_raw_counts}
 p.bp[[1]] <-  
   counts %>% as_tibble() %>%  
@@ -399,42 +368,7 @@ p.hm[[1]] <-
   add_tile(lane)
 ```
 
-```{r pca_combat}
-p.pca[[2]] <- 
-  combat_counts %>%
-  reduce_dimensions(method = "PCA") %>% 
-  pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = PC1, y = PC2, colour = as.character(condition), shape = phase)) +
-  geom_point() +
-  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
-  theme_minimal()
-```
 
-```{r mds_combat}
-p.mds[[2]] <-  
-  combat_counts %>%
-  reduce_dimensions(method = "MDS") %>% 
-  pivot_sample() %>% as_tibble() %>% 
-  ggplot(aes(x = Dim1, y = Dim2, colour = as.character(condition), shape = phase)) +
-  geom_point() +
-  geom_text_repel(aes(label = .sample), show.legend = FALSE) +
-  theme_minimal()
-```
-
-```{r boxplot_combat}
-p.bp[[2]] <- 
-  combat_counts %>% as_tibble() %>% 
-  ggplot(aes(x = sample, y = log(counts), fill = as.character(condition))) + 
-  geom_boxplot() 
-```
-```{r density_plot_combat}
-p.dp[[2]] <- 
-  combat_counts %>% as_tibble() %>%  
-  ggplot(aes(x=counts, color=as.character(.sample))) +
-  geom_density() +
-  scale_x_log10() +
-  theme_minimal()
-```
 ```{r heatmap_combat}
 p.hm[[2]] <- 
   combat_counts %>% 
@@ -899,7 +833,7 @@ if(is.null(de_dat)){
 
 ```{r write_full_table, eval = F}
 write_tsv(de_dat, 
-          paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/", 
+          paste0("/Users/naras0c/Work/data/membrane_cleaning/", 
                  mag_id, 
                  "-cycle_",  cycle_id, 
                  "-", phase_id,
@@ -915,7 +849,7 @@ de_dat %>%
   left_join(MAG_annotation, by = "feature") %>% 
   bind_cols(phase = "initial") %>% 
   select(feature, phase, everything()) %>% 
-  write_tsv(paste0("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/", 
+  write_tsv(paste0("/Users/naras0c/Work/data/membrane_cleaning/", 
                    mag_id, 
                    "-cycle_", cycle_id, 
                    "-", phase_id,
@@ -1070,11 +1004,12 @@ keywords <- c("Biofilm", "Quorum sensing", "Adhesion", "Exopolysaccharide", "Mot
 pattern <- paste(keywords, collapse = "|")
 ```
 
-```{r fig_biofilm_genes}
+```{r fig_biofilm_genes, fig.height = 12, fig.width = 6}
 #| label: fig-biofilm_genes_initial
 #| fig-cap: "Strip-violin-chart of the most significantly expressed biofilm-related genes in the initial flow." 
 #| fig-height: 7
 top_biofilm_genes_table <- 
+  
   counts %>%
 
   # extract counts for top differentially expressed genes
@@ -1088,9 +1023,9 @@ top_biofilm_genes_table <-
 top_biofilm_genes_table %>% 
   ggplot(aes(x = condition, y = counts + 1, 
                fill = condition, group = condition)) +
-    geom_violin(colour = NA, alpha = 0.25) +
-    geom_boxplot(colour = "gray75", alpha = 0.25, width = 0.2) +
-    geom_jitter(aes(colour = condition), alpha = 0.25, ) +
+    #geom_violin(colour = NA, alpha = 0.25) +
+    geom_boxplot(colour = "gray75", alpha = 0.5, width = 0.1) +
+    geom_jitter(aes(colour = condition), alpha = 0.5, ) +
     scale_y_log10() +
     theme_minimal() +
     add_pvalue(data = plot_annotation_dat %>% filter(feature %in% unique(top_biofilm_genes_table$feature)), 
@@ -1099,5 +1034,11 @@ top_biofilm_genes_table %>%
                bracket.nudge.y = 0.1) +
     facet_wrap(~gene_name, ncol = 3) 
 ```
+```{r}
+#top_biofilm_genes_table %>% 
+#  select(.feature, gene_name, gene_function, composite_p_val_fisher_fdr, raw_DESeq2_log2FoldChange, combat_DESeq2_log2FoldChange) %>% distinct() %>% 
+#  write_tsv("")
+```
+
 
 
