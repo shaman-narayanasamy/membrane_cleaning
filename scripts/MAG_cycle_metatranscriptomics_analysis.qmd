@@ -15,10 +15,10 @@ params:
     value: "TI2_MAGScoT_cleanbin_000096"
   cycle_id:
     label: "Cycle ID"
-    value: 1
+    value: 3
   phase_id:
     label: "Phase ID"
-    value: "initial"
+    value: "backflush"
 ---
 # Description
 ```{r}
@@ -92,7 +92,8 @@ MAG_annotation <-
   sprintf('ssh ibex "cat %s"', paste(annotation_folder, mag_id, paste0(mag_id, ".tsv"), sep = '/')) %>%  
   pipe() %>%   
   read_tsv(comment = "#", col_names = F) %>% 
-  select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9, contig = X1, start = X3, end = X4 )
+  select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9, contig = X1, start = X3, end = X4 ) %>% 
+  filter(!is.na(feature))
 ```
 
 ```{r select_features_from_MAG}
@@ -101,7 +102,7 @@ counts <-
 
 counts <- 
   counts %>%  
-  filter(Bakta_ID %in% Bakta_IDs_of_interest) %>% 
+  right_join(MAG_annotation, by = c("Name" = "feature")) %>% 
   pivot_longer(
     cols = sample_info %>% pull(sample_ID),
     names_to = "sample_ID", 
@@ -130,9 +131,8 @@ transcriptomics analysis, rather an analysis of a pseudo-isolate (i.e. MAG)
 isolate analysis using metatranscrtipcomics data, hence we perform several
 strategies for normalising the data. These inlude:
 
-1. ComBat-seq normalisation based on batch effect correction
+1. Raw counts
 2. Housekeeping gene (HKG) -based scaling
-3. Combination of all the above
 
 
 ```{r create_DESeq2_object}
@@ -147,7 +147,8 @@ dds <- DESeq2::DESeqDataSet(counts %>% as_tibble() %>% mutate(counts = as.intege
       design = ~ condition + lane)
 ```
 
-```{r compbat_seq_scaling, output = F}
+```{r combat_seq_scaling, output = F, eval = F}
+## Combat will not be run because not all conditions have replicates. Combat requires replicates
 combat_counts <- 
   ComBat_seq(counts(dds), 
              batch = dds$lane,
@@ -270,7 +271,7 @@ hkg_counts <- counts(dds_hkg, normalized = T) %>% round() %>% as_tibble(rownames
                           .transcript = feature)
 ```
 
-```{r hkg_combat}
+```{r hkg_combat, eval = F}
 #| label: tbl-hkg_genes_combat
 MAG_annotation %>% 
   filter(gene_symbol %in% housekeeping_genes) %>% 
@@ -372,7 +373,7 @@ p.hm[[1]] <-
 ```
 
 
-```{r heatmap_combat}
+```{r heatmap_combat, eval = F}
 p.hm[[2]] <- 
   combat_counts %>% 
   keep_abundant(minimum_counts = 1) %>% 
@@ -431,13 +432,13 @@ p.hm[[3]] <-
   add_tile(lane)
 ```
 
-```{r boxplot_combat_hkg}
+```{r boxplot_combat_hkg, eval = F}
 p.bp[[4]] <- 
   hkg_combat_counts %>% as_tibble() %>%  
   ggplot(aes(x = .sample, y = log(counts), fill = as.character(condition))) +
   geom_boxplot() 
 ```
-```{r density_plot_combat_hkg}
+```{r density_plot_combat_hkg, eval = F}
 p.dp[[4]] <- 
   hkg_combat_counts %>% as_tibble() %>%  
   ggplot(aes(x=counts, color=as.character(.sample))) + 
@@ -445,7 +446,7 @@ p.dp[[4]] <-
   scale_x_log10() + 
   theme_minimal()
 ```
-```{r heatmap_combat_hkg}
+```{r heatmap_combat_hkg, eval = F}
 p.hm[[4]] <- 
   hkg_combat_counts %>% 
   keep_abundant(minimum_counts = 1) %>% 
@@ -491,16 +492,12 @@ for (i in 1:length(p.bp)){
 #| fig-cap: "Boxplots of unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
 #| fig-subcap:
 #|   - "Raw counts"
-#|   - "ComBat-seq" 
 #|   - "HKG" 
-#|   - "ComBat-seq + HKG" 
 #| layout-ncol: 1
 #| fig-height: 2
 
 p.bp[[1]] 
 p.bp[[2]] 
-p.bp[[3]] 
-p.bp[[4]] 
 ```
 
 ```{r plot_density_plots}
@@ -508,14 +505,10 @@ p.bp[[4]]
 #| fig-cap: "Density plots of unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
 #| fig-subcap:
 #|   - "Raw counts"
-#|   - "ComBat-seq" 
 #|   - "HKG" 
-#|   - "ComBat-seq + HKG" 
 #| layout-ncol: 2
 p.dp[[1]] 
 p.dp[[2]] 
-p.dp[[3]] 
-p.dp[[4]] 
 ```
 
 ```{r}
@@ -523,15 +516,11 @@ p.dp[[4]]
 #| fig-cap: "Heatmap of topm variable genes in the unnormalised raw counts and various normalised/scaled counts. HKG - housekeeping genes based scaling." 
 #| fig-subcap:
 #|   - "Raw counts"
-#|   - "ComBat-seq" 
 #|   - "HKG" 
-#|   - "ComBat-seq + HKG" 
 #| layout-ncol: 2
 #| fig-height: 8
 p.hm[[1]] 
 p.hm[[2]] 
-p.hm[[3]] 
-p.hm[[4]] 
 ```
 
 ## Differential expression analysis
@@ -575,7 +564,8 @@ visualises the expression of the most significant genes.
 
 
 ```{r define_expression_object_list}
-expr_list <- list("raw" = counts, "combat" = combat_counts, "hkg" = hkg_counts, "combat_hkg" = hkg_combat_counts)
+expr_list <- list("raw" = counts, 
+                  "hkg" = hkg_counts)
 ```
 ```{r function_de}
 ## Function: Perform all DE analysis methods on given tables/normalisations including different phases
@@ -762,20 +752,19 @@ if(is.null(de_dat)){
     }
 ```
 
-```{r write_full_table, eval = F}
+```{r write_full_table}
 write_tsv(de_dat, 
           paste0("/Users/naras0c/Work/data/membrane_cleaning/", 
                  mag_id, 
                  "-cycle_",  cycle_id, 
                  "-", phase_id,
-                 "differential_expression_results.tsv")
+                 "-differential_expression_results.tsv")
           ) 
-)
 
 de_dat %>% 
   filter(composite_p_val_fisher_fdr <= 0.05 & 
            significant_proportion > 0.5 & 
-           combat_DESeq2_log2FoldChange >= abs(log2(2))) %>% 
+           raw_DESeq2_log2FoldChange >= abs(log2(2))) %>% 
   select(feature, composite_p_val_fisher, composite_p_val_fisher_fdr, significant_proportion, raw_edgerQLT_logFC) %>% 
   left_join(MAG_annotation, by = "feature") %>% 
   bind_cols(phase = "initial") %>% 
@@ -947,29 +936,25 @@ top_biofilm_genes_table <-
   left_join(plot_annotation_dat, by = c("feature","condition")) %>%
   filter(grepl(pattern, gene_function, ignore.case = TRUE)) %>%
   left_join(de_dat %>% select(-composite_p_val_fisher_fdr), by = c("feature")) %>%  
-  filter(counts > 1 & composite_p_val_fisher_fdr <= 0.05 & abs(combat_edgerQLT_logFC) >= abs(log2(2)) & significant_proportion)  %>% 
+  filter(counts > 1 & composite_p_val_fisher_fdr <= 0.05 & abs(raw_edgerQLT_logFC) >= abs(log2(2)) & significant_proportion)  %>% 
   as_tibble() %>% 
   arrange(composite_p_val_fisher_fdr)
 
-top_biofilm_genes_table %>% 
-  ggplot(aes(x = condition, y = counts + 1, 
+if (nrow(top_biofilm_genes_table) == 0) {
+ print("No siginificant biofilm genes. Nothing to do.")  
+  } else { 
+    top_biofilm_genes_table %>% 
+      ggplot(aes(x = condition, y = counts + 1, 
                fill = condition, group = condition)) +
-    #geom_violin(colour = NA, alpha = 0.25) +
-    geom_boxplot(colour = "gray75", alpha = 0.5, width = 0.1) +
-    geom_jitter(aes(colour = condition), alpha = 0.5, ) +
-    scale_y_log10() +
-    theme_minimal() +
-    add_pvalue(data = plot_annotation_dat %>% filter(feature %in% unique(top_biofilm_genes_table$feature)), 
-               label = "Fisher FDR = {fisher_fdr_round}", 
-               y.position = "ypos", 
-               bracket.nudge.y = 0.1) +
-    facet_wrap(~gene_name, ncol = 3) 
+      #geom_violin(colour = NA, alpha = 0.25) +
+      geom_boxplot(colour = "gray75", alpha = 0.5, width = 0.1) +
+      geom_jitter(aes(colour = condition), alpha = 0.5, ) +
+      scale_y_log10() +
+      theme_minimal() +
+      add_pvalue(data = plot_annotation_dat %>% filter(feature %in% unique(top_biofilm_genes_table$feature)), 
+                 label = "Fisher FDR = {fisher_fdr_round}", 
+                 y.position = "ypos", 
+                 bracket.nudge.y = 0.1) +
+      facet_wrap(~gene_name, ncol = 3)  
+  }
 ```
-```{r}
-#top_biofilm_genes_table %>% 
-#  select(.feature, gene_name, gene_function, composite_p_val_fisher_fdr, raw_DESeq2_log2FoldChange, combat_DESeq2_log2FoldChange) %>% distinct() %>% 
-#  write_tsv("")
-```
-
-
-

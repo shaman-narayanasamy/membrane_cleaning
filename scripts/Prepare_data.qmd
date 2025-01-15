@@ -98,6 +98,22 @@ bakta2MAG <- sprintf('ssh ibex "cat %s"', bakta2MAG_path ) %>%
 
 write_tsv(bakta2MAG, "/Users/naras0c/Work/data/membrane_cleaning/bakta2MAG_mappings.tsv")
 ```
+```{r}
+counts <-
+  read_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_counts.tsv")
+
+counts %>% 
+  select(-Length, -EffectiveLength, -Name) %>% 
+  pivot_longer(-Bakta_ID, names_to = "sample_ID", values_to = "count") %>% 
+  group_by(Bakta_ID, sample_ID) %>% 
+  mutate(count = sum(count)) %>% 
+  ungroup() %>% 
+  group_by(sample_ID) %>% 
+  mutate(total_count_sample = sum(count)) %>% 
+  mutate(relab = count/total_count_sample * 100) %>% 
+  ungroup() %>% 
+
+```
 
 ## Metagenomics
 ```{r eval=FALSE}
