@@ -78,6 +78,7 @@ mag_info <-
 ```{r write_mag_info_table, eval = F}
 write_tsv(mag_info, "/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/dereplicated_refined_MAG_information.tsv")
 ```
+
 ## Metagenomics assembled genomes (MAG)
 @fig-mag_stats shows the completeness statistics and the proportion of MAGs that
 were successfully classified on each taxonomic level. Due to our stringent MAG
@@ -86,6 +87,10 @@ relatively high-quality MAGs (@fig-mag_stats-1). However, only a small portion
 of those MAGs could be classified at the lower taxonomy levels, e.g. class and
 below (@fig-mag_stats-2). The larger number of "species" classified, is likely
 due to the presence of MAGs from previous studies deposited into the database.
+
+```{r read_mat_info_table}
+mag_info <- read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/dereplicated_refined_MAG_information.tsv")
+```
 
 ```{r create_ordering}
 ## Create taxonomic order for downstream visualisation
@@ -119,6 +124,7 @@ mag_info %>%
   theme(legend.title = element_blank()) 
 
 mag_info %>% 
+  filter(contamination_metric %in% c("high", "very high")) %>% 
   select( 
     c("genome", 
       "superkingdom_score",
@@ -256,6 +262,9 @@ bakta2MAG_path <- '/scratch/users/snarayanasamy/membrane_cleaning/output/metatra
 bakta2MAG <- sprintf('ssh iris "cat %s"', bakta2MAG_path ) %>%   
   pipe() %>%  
   read_tsv(col_names = c("MAG_ID", "Bakta_ID"))
+```
+```{r}
+mg_counts
 ```
 
 ```{r read_transcriptomics_data}
