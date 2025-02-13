@@ -1,0 +1,600 @@
+---
+title: "Membrane cleaning all MAG analysis"
+author: "Shaman Narayanasamy"
+editor: source
+fig-cap-location: bottom
+format:
+  html: default
+execute:
+  echo: false 
+  warning: false
+  message: false
+params:
+  mag_info_ncbi: "/Users/naras0c/Work/data/membrane_cleaning/dereplicated_refined_MAG_information-ncbi.tsv"
+  mag_info_gtdb: "/Users/naras0c/Work/data/membrane_cleaning/dereplicated_refined_MAG_information-gtdb.tsv"
+---
+
+```{r load_libraries}
+library(tidyverse)
+library(googlesheets4)
+library(rlang)
+library(phyloseq)
+library(DESeq2)
+library(vegan)
+
+# Load the RColorBrewer library
+library(RColorBrewer)
+```
+# Description
+
+This document is generated from a quarto markdown file that contains the code for the analysis. To view the code, please visit the membrane cleaning github repository or request it from the author of this file. 
+
+## Data
+The following information is required for this analysis:
+
+- `dRep` results, which includes completeness/contamination metrics from checkM
+- `CAT/BAT` taxonomic classification output
+- Gene annotations from `Bakta` to link transcripts to MAGs
+- Mapping of Bakta genome IDs to MAG IDs 
+- Raw counts of metagenomic reads mapped to MAGs
+- Raw counts of metatranscriptomic reads mapped to transcripts of all MAGs
+- Sample information table 
+
+MAGs with multiple taxonomic assignments are considered to be ambiguous and are excluded from downstream analyses. The `dRep` table and `CAT/BAT` tables are merged to combine the completeness information with taxonomic information.
+```{r read_mag_info}
+mag_info <- 
+  read_tsv(params$mag_info_ncbi)
+```
+## Expore the classification metrics
+```{r visualise_mag_stats_pie_completeness}
+#| label: fig-mag_stats_completeness
+#| fig-cap: "Metagenomic assembled genome (MAG) completeness statistics." 
+#| layout-ncol: 1
+mag_info %>% 
+  select("completeness_metric") %>% 
+  group_by(completeness_metric) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+ ggplot(aes(x = "", y = count, fill = completeness_metric)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y") +
+  geom_text(aes(label = count), position = position_stack(vjust = 0.5)) +
+  theme_void() +
+  theme(legend.title = element_blank())
+```
+```{r visualise_mag_stats_pie_contamination}
+#| label: fig-mag_stats_contamination
+#| fig-cap: "Metagenomic assembled genome (MAG) contamination statistics." 
+#| layout-ncol: 1
+mag_info %>% 
+  select("contamination_metric") %>% 
+  group_by(contamination_metric) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+ ggplot(aes(x = "", y = count, fill = contamination_metric)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y") +
+  geom_text(aes(label = count), position = position_stack(vjust = 0.5)) +
+  theme_void() +
+  theme(legend.title = element_blank())
+```
+
+```{r create_ordering}
+## Create taxonomic order for downstream visualisation
+taxonomy_ordering <- c("superkingdom",
+                       "phylum", 
+                       "class", 
+                       "order" ,
+                       "family",
+                       "genus",
+                       "species"  
+                       )
+```
+
+```{r visualise_mag_stats_bar}
+mag_info %>% 
+  select( 
+    c("genome", 
+      "superkingdom_score",
+      "phylum_score",
+      "class_score",
+      "order_score" ,
+      "family_score",
+      "genus_score",
+      "species_score" 
+      )
+  ) %>% 
+  pivot_longer(cols = c(
+      "superkingdom_score",
+      "phylum_score",
+      "class_score",
+      "order_score" ,
+      "family_score",
+      "genus_score",
+      "species_score"),
+               names_to = "taxonomy", 
+               values_to = "score"
+               ) %>% 
+  mutate(classified = ifelse(!is.na(score), "yes", "no")) %>% 
+  separate(taxonomy, into = "taxonomy", sep = "_") %>% 
+  group_by(taxonomy, classified) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+  mutate(proportion = (count/257)*100,
+         taxonomy = factor(taxonomy, levels = taxonomy_ordering)) %>% 
+  ggplot(aes(x = taxonomy, y = proportion, fill = classified)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = c("yes" = "darkgreen", "no" = "gray")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, 
+                                           margin = margin(t = 5, r = 0, b = 0, l = 0)))
+```
+
+```{r read_mag_info}
+mag_info <- 
+  mag_info %>% 
+  ## Remove only those MAGs that were highly contaminated
+  filter(contamination_metric != "very high") %>%  
+  mutate_if(is.character, ~na_if(., "no support"))
+```
+
+```{r load_sample_information, warning=F}
+sample_info <- 
+  read_tsv('/Users/naras0c/Work/data/membrane_cleaning/sample_info.txt', comment = "#") %>% 
+  dplyr::rename("sample_ID" = "sample_id")
+```
+
+## Metagenomics assembled genomes (MAG)
+@fig-mag_stats shows the completeness statistics and the proportion of MAGs that
+were successfully classified on each taxonomic level. Due to our stringent MAG
+refinement and selection process, it is generally expected that we retain
+relatively high-quality MAGs (@fig-mag_stats-1). However, only a small portion
+of those MAGs could be classified at the lower taxonomy levels, e.g. class and
+below (@fig-mag_stats-2). The larger number of "species" classified, is likely
+due to the presence of MAGs from previous studies deposited into the database.
+
+
+## Metagenomics 
+@fig-mg_relab shows the metagenomic relative abundances of MAGs aggregated on
+different taxonomic levels. The large number of unknown taxa on the lower
+taxonomic levels (i.e. fig-mag_stats) is reflected in the respective
+relative abundance plots (e.g. fig-mg_relab-4).
+
+```{r prepare_mg_data}
+mg_counts <- 
+  read_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_MAG_counts.tsv") %>% 
+  pivot_longer(cols = 
+                 sample_info %>% select(sample_ID) %>% 
+                 separate(sample_ID, into = "sample_ID", sep = "_") %>% 
+                 distinct() %>% pull(sample_ID),
+               names_to = "sample_ID",
+               values_to = "count") %>% 
+  left_join(sample_info, by = "sample_ID") %>% 
+  right_join(mag_info, by = c("MAG_ID" = "genome")) # Join based on the taxa that were retained for analysis
+```
+
+
+```{r write_mg_data, eval = F}
+mg_counts %>% 
+  pivot_wider(id_cols = "MAG_ID", names_from = "sample_ID", values_from = count) %>% 
+  rowwise() %>% 
+  mutate(mean = mean(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  mutate(sd = sd(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  ungroup() %>%
+  left_join(mag_info %>% select(MAG_ID = genome, 
+                                superkingdom,
+                                phylum,
+                                order,
+                                family,
+                                genus,
+                                species
+                                ), by = "MAG_ID") %>%
+
+
+select(MAG_ID,
+         superkingdom, 
+         phylum,
+         order,
+         family,
+         genus,
+         species, 
+         everything()) %>% 
+  arrange(desc(mean)) %>% 
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_MAG_counts_withMeanSD.tsv")
+
+mg_counts %>% 
+  select(sample_ID, MAG_ID, count) %>% 
+  group_by(MAG_ID, sample_ID) %>% 
+  mutate(count = sum(count)) %>% 
+  ungroup() %>% 
+  group_by(sample_ID) %>% 
+  mutate(total_count_sample = sum(count)) %>% 
+  mutate(relab = count/total_count_sample * 100) %>% 
+  select(sample_ID, MAG_ID, relab) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = "MAG_ID", names_from = "sample_ID", values_from = relab) %>% 
+  rowwise() %>% 
+  mutate(mean = mean(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  mutate(sd = sd(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  ungroup() %>% 
+  arrange(desc(mean)) %>% 
+  left_join(mag_info %>% select(MAG_ID = genome, 
+                                superkingdom,
+                                phylum,
+                                order,
+                                family,
+                                genus,
+                                species
+                                ), by = "MAG_ID") %>%  
+  select(MAG_ID,
+         superkingdom, 
+         phylum,
+         order,
+         family,
+         genus,
+         species, 
+         everything()) %>% 
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_MAG_relab_withMeanSD.tsv")
+```
+
+## Metatranscriptomics
+```{r load_sample_information, warning=F}
+sample_info <- 
+  read_tsv('/Users/naras0c/Work/data/membrane_cleaning/mt_sample_info.txt', comment = '#') %>% 
+  mutate(sample_ID = paste(sample, lane, sep = '_'),
+         lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
+  select(sample_ID, everything(), -sample, -R1, -R2) %>% 
+  mutate(replicate = as.factor(replicate),
+         lane = as.factor(lane)
+         ) %>% 
+  separate(sample_ID, extra = "drop", into = "sample", remove = FALSE) %>% 
+  mutate(sample = str_remove_all(sample, "[0-9]$"))
+```
+
+
+```{r}
+bakta2MAG <- read_tsv("/Users/naras0c/Work/data/membrane_cleaning/bakta2MAG_mappings.tsv")
+```
+
+```{r read_transcriptomics_data}
+mt_counts <- 
+  read_tsv("/Users/naras0c/Work/data/membrane_cleaning//metatranscriptomics_counts.tsv") %>% 
+  select(Bakta_ID, contains("_L00")) %>% 
+  pivot_longer(cols = sample_info %>% pull(sample_ID),
+               names_to = "sample_ID",
+               values_to = "count") %>% 
+  group_by(Bakta_ID, sample_ID) %>% 
+  summarise(count = sum(count, na.rm = T)) %>% 
+  ungroup() %>% 
+  distinct() %>% 
+  left_join(bakta2MAG, by = "Bakta_ID") %>% 
+  right_join(mag_info, by = c("MAG_ID" = "genome")) %>% 
+  left_join(sample_info, by = "sample_ID")
+```
+
+
+```{r write_transcriptomics_data, eval = F}
+mt_counts %>% 
+  pivot_wider(id_cols = "MAG_ID", names_from = "sample_ID", values_from = count) %>% 
+  ## Write out an intermediate file with the raw counts
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_MAG_counts.tsv") %>% 
+  rowwise() %>% 
+  mutate(mean = mean(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  mutate(sd = sd(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  ungroup() %>%
+  left_join(mag_info %>% select(MAG_ID = genome, 
+                                superkingdom,
+                                phylum,
+                                order,
+                                family,
+                                genus,
+                                species
+                                ), by = "MAG_ID") %>%  
+  select(MAG_ID,
+         superkingdom, 
+         phylum,
+         order,
+         family,
+         genus,
+         species, 
+         everything()) %>% 
+  arrange(desc(mean)) %>% 
+  ## Write file with mean and SD of the counts
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_MAG_counts_withMeanSD.tsv")
+
+mt_counts %>% 
+  select(sample_ID, MAG_ID, count) %>% 
+  group_by(MAG_ID, sample_ID) %>% 
+  mutate(count = sum(count)) %>% 
+  ungroup() %>% 
+  group_by(sample_ID) %>% 
+  mutate(total_count_sample = sum(count)) %>% 
+  mutate(relab = count/total_count_sample * 100) %>% 
+  select(sample_ID, MAG_ID, relab) %>% 
+  ungroup() %>% 
+  #mutate(relab_avg = sum(relab/23)) #%>% 
+  pivot_wider(id_cols = "MAG_ID", names_from = "sample_ID", values_from = relab) %>% 
+  rowwise() %>% 
+  mutate(mean = mean(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  mutate(sd = sd(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  ungroup() %>% 
+  arrange(desc(mean)) %>%  
+  left_join(mag_info %>% select(MAG_ID = genome, 
+                                superkingdom,
+                                phylum,
+                                order,
+                                family,
+                                genus,
+                                species
+                                ), by = "MAG_ID") %>%  
+  select(MAG_ID,
+         superkingdom, 
+         phylum,
+         order,
+         family,
+         genus,
+         species, 
+         everything()) %>% 
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_MAG_relab_withMeanSD.tsv")
+```
+
+
+```{r prepare_phyloseq}
+## Phyloseq for MG data
+mg_ps <- 
+  phyloseq( 
+    mg_counts %>% 
+      mutate(count = as.integer(count)) %>% 
+      pivot_wider(id_cols = MAG_ID, names_from = sample_ID, values_from = count) %>% 
+      column_to_rownames("MAG_ID") %>% 
+      as.matrix() %>% 
+      otu_table(taxa_are_rows = TRUE),
+    sample_data( 
+      sample_info %>%  
+        rename("cycle" = "replicate") %>%  
+        mutate(sample_ID = paste(sample, cycle, sep = "")) %>% 
+        select(-sample, -lane) %>% 
+        data.frame() %>% 
+        distinct() %>% 
+        column_to_rownames("sample_ID") %>% 
+        sample_data()
+    ), 
+      read_tsv(params$mag_info_ncbi) %>% 
+      select(MAG_ID = genome, c(taxonomy_ordering)) %>%  
+      rename("kingdom" = "superkingdom") %>%  
+      column_to_rownames("MAG_ID") %>%  
+      as.matrix() %>% 
+      tax_table()
+)
+
+mg_ps_rarefied <- rarefy_even_depth(mg_ps, 
+                                rngseed = 1, # Set seed for reproducibility
+                                sample.size = 0.95*min(sample_sums(mg_ps)), # Subselect no. of reads equivalent to 95% of the smallest sample
+                                replace = FALSE)
+```
+
+```{r remove_low_abundant_otus}
+# define a minimum count threshold
+min_count_threshold <- 1000000
+
+# filter out otus with a total count below the threshold
+mg_ps_pruned <- filter_taxa(mg_ps_rarefied, function(x) sum(x) >= min_count_threshold, TRUE)
+```
+```{r}
+# Define a minimum sample presence threshold
+min_samples_threshold <- round(nrow(sample_data(mg_ps_pruned)) * 0.10) # OTU must be present at least in 10% of the samples
+
+# Filter out OTUs that are not present in at least 'min_samples_threshold' samples
+mg_ps_pruned <- filter_taxa(mg_ps_pruned, function(x) sum(x > 0) >= min_samples_threshold, TRUE)
+
+mg_ps_relab <- transform_sample_counts(mg_ps_pruned, function(x) x / sum(x))
+```
+
+### Alpha diversity
+```{r compute_mg_richness}
+plot_richness(mg_ps, color = "condition", measures = c("Observed", "Chao1"))
+
+my_measures <- c("Observed", "Chao1", "Shannon", "Simpson")
+plot_richness(mg_ps_pruned, x = "condition", measures = my_measures, nrow = 2) + 
+  geom_boxplot(aes(fill = condition), alpha = 0.5) 
+
+## Calculate richness based on difference measures
+mg_rich <- estimate_richness(mg_ps_pruned)
+
+
+# Test whether the observed number of OTUs differs significantly between conditions. Perform a non-parametric test, the Wilcoxon rank-sum test (Mann-Whitney):
+pairwise.wilcox.test(mg_rich$Simpson, sample_data(mg_ps)$condition)
+pairwise.wilcox.test(mg_rich$Shannon, sample_data(mg_ps)$condition)
+pairwise.wilcox.test(mg_rich$InvSimpson, sample_data(mg_ps)$condition)
+pairwise.wilcox.test(mg_rich$Fisher, sample_data(mg_ps)$condition)
+```
+
+
+```{r compute_mg_richness}
+pairwise.wilcox.test(mg_rich$Simpson, sample_data(mg_ps)$phase)
+pairwise.wilcox.test(mg_rich$Shannon, sample_data(mg_ps)$phase)
+pairwise.wilcox.test(mg_rich$InvSimpson, sample_data(mg_ps)$phase)
+pairwise.wilcox.test(mg_rich$Fisher, sample_data(mg_ps)$phase)
+```
+
+
+```{r compute_mg_richness}
+pairwise.wilcox.test(mg_rich$Simpson, sample_data(mg_ps)$cycle)
+pairwise.wilcox.test(mg_rich$Shannon, sample_data(mg_ps)$cycle)
+pairwise.wilcox.test(mg_rich$InvSimpson, sample_data(mg_ps)$cycle)
+pairwise.wilcox.test(mg_rich$Fisher, sample_data(mg_ps)$cycle)
+```
+
+### Beta diversity
+```{r dimensionality_reduction, fig.width = 5, fig.height = 4}
+# PCoA plot using the unweighted UniFrac as distance
+mg_dist = phyloseq::distance(mg_ps_rarefied, method="bray", weighted=F)
+ordination = ordinate(mg_ps_rarefied, method="PCoA", distance="bray")
+plot_ordination(mg_ps_rarefied, ordination, color="condition", shape = "cycle") + theme(aspect.ratio=1)
+```
+```{r}
+library(vegan)
+adonis2(mg_dist ~ sample_data(mg_ps_rarefied)$cycle) 
+adonis2(mg_dist ~ sample_data(mg_ps_rarefied)$condition)
+adonis2(mg_dist ~ sample_data(mg_ps_rarefied)$phase)
+```
+
+```{r deseq2}
+## Define a model for downstream diffrential analysis. In this case, we are interested in the "condition" variable
+sample_data(mg_ps)$condition <- as.factor(sample_data(mg_ps)$condition)
+
+## Create differential abundance object for analysis object based on the model just created
+mg_ds <- phyloseq_to_deseq2(mg_ps, ~ condition) 
+mg_ds <- DESeq(mg_ds)
+
+## Define the significance levels 
+alpha = 0.01
+
+## Compute the and rank different expression results that compares treatment (i.e. samples with OMP-spikes vs control)
+mg_res_sig <- 
+  results(mg_ds, contrast=list(c("condition_treatment_vs_control")), alpha=alpha) %>%  # Here is where we define the comparison
+  
+  as.data.frame() %>% 
+  rownames_to_column("OTU") %>% 
+  as_tibble()  
+ 
+mg_res_sig %>% 
+  filter(padj <= 0.05 & (log2FoldChange >= log2(2) | log2FoldChange <= log2(0.5)))
+```
+
+## MT Diversity computation
+```{r prepare_phyloseq}
+## Phyloseq for MG data
+mt_ps <- 
+  phyloseq(  
+    mt_counts %>% 
+      mutate(count = as.integer(count)) %>% 
+      pivot_wider(id_cols = MAG_ID, names_from = sample_ID, values_from = count) %>% 
+      column_to_rownames("MAG_ID") %>% 
+      as.matrix() %>% 
+      otu_table(taxa_are_rows = TRUE),
+    sample_data( 
+      sample_info %>%  
+        select(sample_ID, phase, condition, cycle = replicate) %>%  
+        data.frame() %>% 
+        distinct() %>% 
+        column_to_rownames("sample_ID") %>% 
+        sample_data()
+    ), 
+    mag_info %>% select(MAG_ID = genome, c(taxonomy_ordering)) %>%  
+      rename("kingdom" = "superkingdom") %>%  
+      column_to_rownames("MAG_ID") %>%  
+      as.matrix() %>% 
+      tax_table()
+)
+
+mt_ps_rarefied <- rarefy_even_depth(mt_ps, 
+                                rngseed = 1, # Set seed for reproducibility
+                                sample.size = 0.95*min(sample_sums(mt_ps)), # Subselect no. of reads equivalent to 95% of the smallest sample
+                                replace = FALSE)
+```
+
+```{r remove_low_abundant_otus}
+# define a minimum count threshold
+min_count_threshold <- 1000000
+
+# filter out otus with a total count below the threshold
+mt_ps_pruned <- filter_taxa(mt_ps_rarefied, function(x) sum(x) >= min_count_threshold, TRUE)
+```
+```{r}
+# Define a minimum sample presence threshold
+min_samples_threshold <- round(nrow(sample_data(mt_ps_pruned)) * 0.10) # OTU must be present at least in 10% of the samples
+
+# Filter out OTUs that are not present in at least 'min_samples_threshold' samples
+mt_ps_pruned <- filter_taxa(mt_ps_pruned, function(x) sum(x > 0) >= min_samples_threshold, TRUE)
+
+mt_ps_relab <- transform_sample_counts(mt_ps_pruned, function(x) x / sum(x))
+```
+
+### Alpha diversity
+```{r compute_mt_richness}
+plot_richness(mt_ps, color = "condition", measures = c("Observed", "Chao1"))
+
+my_measures <- c("Observed", "Chao1", "Shannon", "Simpson")
+plot_richness(mt_ps_pruned, x = "condition", measures = my_measures, nrow = 2) + 
+  geom_boxplot(aes(fill = condition), alpha = 0.5) 
+
+## Calculate richness based on difference measures
+mt_rich <- estimate_richness(mt_ps_pruned)
+
+
+# Test whether the observed number of OTUs differs significantly between conditions. Perform a non-parametric test, the Wilcoxon rank-sum test (Mann-Whitney):
+pairwise.wilcox.test(mt_rich$Simpson, sample_data(mt_ps)$condition)
+pairwise.wilcox.test(mt_rich$Shannon, sample_data(mt_ps)$condition)
+pairwise.wilcox.test(mt_rich$InvSimpson, sample_data(mt_ps)$condition)
+pairwise.wilcox.test(mt_rich$Fisher, sample_data(mt_ps)$condition)
+```
+
+
+```{r compute_mt_richness}
+pairwise.wilcox.test(mt_rich$Simpson, sample_data(mt_ps)$phase)
+pairwise.wilcox.test(mt_rich$Shannon, sample_data(mt_ps)$phase)
+pairwise.wilcox.test(mt_rich$InvSimpson, sample_data(mt_ps)$phase)
+pairwise.wilcox.test(mt_rich$Fisher, sample_data(mt_ps)$phase)
+```
+
+
+```{r compute_mt_richness}
+pairwise.wilcox.test(mt_rich$Simpson, sample_data(mt_ps)$cycle)
+pairwise.wilcox.test(mt_rich$Shannon, sample_data(mt_ps)$cycle)
+pairwise.wilcox.test(mt_rich$InvSimpson, sample_data(mt_ps)$cycle)
+pairwise.wilcox.test(mt_rich$Fisher, sample_data(mt_ps)$cycle)
+```
+
+### Dimensionality reduction
+```{r dimensionality_reduction, fig.width = 5, fig.height = 4}
+# PCoA plot using the unweighted UniFrac as distance
+mt_dist = phyloseq::distance(mt_ps_rarefied, method="bray", weighted=F)
+ordination = ordinate(mt_ps_rarefied, method="PCoA", distance="bray")
+plot_ordination(mt_ps_rarefied, ordination, color="condition") + theme(aspect.ratio=1)
+plot_ordination(mt_ps_rarefied, ordination, color="phase") + theme(aspect.ratio=1)
+plot_ordination(mt_ps_rarefied, ordination, color="cycle") + theme(aspect.ratio=1)
+```
+```{r}
+adonis2(mt_dist ~ sample_data(mt_ps_rarefied)$cycle) 
+adonis2(mt_dist ~ sample_data(mt_ps_rarefied)$condition)
+adonis2(mt_dist ~ sample_data(mt_ps_rarefied)$phase)
+```
+```{r deseq2}
+## Define a model for downstream diffrential analysis. In this case, we are interested in the "condition" variable
+sample_data(mt_ps)$condition <- as.factor(sample_data(mt_ps)$condition)
+
+## Create differential abundance object for analysis object based on the model just created
+mt_ds <- phyloseq_to_deseq2(mt_ps, ~ condition) 
+mt_ds <- DESeq(mt_ds)
+
+## Define the significance levels 
+alpha = 0.01
+
+## Compute the and rank different expression results that compares treatment (i.e. samples with OMP-spikes vs control)
+mt_res_sig <- 
+  results(mt_ds, contrast=list(c("condition_treatment_vs_control")), alpha=alpha) %>%  # Here is where we define the comparison
+  as.data.frame() %>% 
+  rownames_to_column("OTU") %>% 
+  as_tibble() 
+
+## Display the table (for informational purposes)
+mt_res_sig %>% 
+  filter(padj <= 0.05 | log2FoldChange >= log2(2) | log2FoldChange <= log2(0.5)) %>% 
+  arrange(desc(abs(log2FoldChange)), -padj)
+
+mt_res_sig %>% 
+  filter(padj <= 0.05 | log2FoldChange >= log2(2) | log2FoldChange <= log2(0.5)) %>% 
+  arrange(desc(abs(log2FoldChange)), padj) %>% 
+#  left_join(
+#    tax_table(mt_ps) %>% 
+#  as.data.frame() %>% 
+#  rownames_to_column(var = "OTU") %>%  # Preserve row names as a column
+#  as_tibble(),
+#   by = "OTU" 
+#  ) %>% 
+  left_join(mag_info, by = c("OTU" = "genome")) %>% 
+  #filter(contamination == "low")
+  filter(completeness_metric %in% c("perfect", "near", "substantial") & contamination_metric == "low") %>% 
+  head(10) %>% 
+  filter(is.na(family))
+```
