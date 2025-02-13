@@ -41,7 +41,7 @@ $ launchers/sbatch_<launch_name>.sh --unlock
 ## Rendering transcriptomics analysis markdown files
 Given that we are analysing multiple experiments separately, the scripts are designed to be modular, such that the parameters can be adjusted to perform the analysis of the relevant experiment/group. Here is the example of the command:
 ```{shell}
-quarto render /Users/shaman.narayanasamy/Work/repositories/github/membrane_cleaning/scripts/MAG_cycle_metatranscriptomics_analysis.qmd --to html -P mag_id=TI2_MAGScoT_cleanbin_000096 -P cycle_id=1 -P phase_id=initial -o test_output.html --output-dir render
+$ quarto render ./scripts/MAG_cycle_metatranscriptomics_analysis.qmd --to html -P mag_id=TI2_MAGScoT_cleanbin_000096 -P cycle_id=1 -P phase_id=initial -o test_output.html --output-dir render
 ```
 Accordingly:
 - `mag_id`: can be obtained from the list of MAGs, based on the BAKTA IDs
@@ -93,4 +93,22 @@ container were used instead of conda virtual environments.
     └── metatranscriptomics
         ├── preprocessing.smk
         └── quantification.smk
+```
+
+## Miscellaneous items
+
+### Counting number of bins from each binning method and sample
+
+```{sh}
+# For concoct results
+find [CT]*/bins_not_filtered/concoct.zip -type l -print0 | xargs -0 -I{} sh -c 'echo -n "{}: "; unzip -l "$(readlink -f {})" | grep " files$"' | sed -e 's/:/\t/g' | sed -E 's/ +/\t/g' | cut -f1,4 | sed -e 's:/bins_not_filtered/concoct.zip::g'
+
+# For metabin results
+find [CT]*/bins_not_filtered/metabin.zip -type l -print0 | xargs -0 -I{} sh -c 'echo -n "{}: "; unzip -l "$(readlink -f {})" | grep " files$"' | sed -e 's/:/\t/g' | sed -E 's/ +/\t/g' | cut -f1,4 | sed -e 's:/bins_not_filtered/metabin.zip::g'
+
+# For maxbin results
+find [CT]*/bins_not_filtered/maxbin.zip -type l -print0 | xargs -0 -I{} sh -c 'echo -n "{}: "; unzip -l "$(readlink -f {})" | grep " files$"' | sed -e 's/:/\t/g' | sed -E 's/ +/\t/g' | cut -f1,4 | sed -e 's:/bins_not_filtered/maxbin.zip::g'
+
+## For magscot data
+find [CT]*/magscot_bins -type f -name "*.fasta" -exec sh -c 'echo "$(dirname {}) : $(ls -1 {} | wc -l)"' \; | sort | uniq -c | sed -e 's/:/\t/g' | sed -E 's/ +/\t/g' | sed -e 's:/magscot_bins::g'| cut -f3,2
 ```

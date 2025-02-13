@@ -1,0 +1,296 @@
+---
+title: "Membrane cleaning MAG analysis"
+author: "Shaman Narayanasamy"
+editor: source
+fig-cap-location: bottom
+format:
+  html: default
+execute:
+  echo: false 
+  warning: false
+  message: false
+---
+
+```{r load_libraries}
+library(tidyverse)
+library(googlesheets4)
+library(rlang)
+```
+# Description
+
+This document is generated from a quarto markdown file that contains the code for the analysis. To view the code, please visit the membrane cleaning github repository or request it from the author of this file. 
+
+## Data
+The following information is required for this analysis:
+
+- `dRep` results, which includes completeness/contamination metrics from checkM
+- `CAT/BAT` taxonomic classification output
+- Gene annotations from `Bakta` to link transcripts to MAGs
+- Mapping of Bakta genome IDs to MAG IDs 
+- Raw counts of metagenomic reads mapped to MAGs
+- Raw counts of metatranscriptomic reads mapped to transcripts of all MAGs
+- Sample information table 
+
+MAGs with multiple taxonomic assignments are considered to be ambiguous and are excluded from downstream analyses. The `dRep` table and `CAT/BAT` tables are merged to combine the completeness information with taxonomic information.
+
+
+```{r read_drep_results}
+drep_table <- 
+  '/ibex/scratch/projects/c2188/membrane_cleaning/output/dereplication/all/dereplicated_bins/data_tables/Widb.csv' %>% 
+  sprintf('ssh ibex "cat %s"', .) %>% 
+  pipe() %>% 
+  read_csv() 
+  mutate(genome = str_replace_all(genome, ".fasta", "")) 
+```
+
+```{r load_sample_information, warning=F}
+sample_info <- read_tsv('/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
+  mutate(sample_ID = paste(sample, lane, sep = '_'),
+         lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
+  select(sample_ID, everything(), -sample, -R1, -R2) 
+```
+```{r filter_out_duplicates}
+bat_table <- 
+  bat_table %>% 
+  filter(!duplicated(genome)) 
+```
+
+## Metagenomics assembled genomes (MAG)
+@fig-mag_stats shows the completeness statistics and the proportion of MAGs that
+were successfully classified on each taxonomic level. Due to our stringent MAG
+refinement and selection process, it is generally expected that we retain
+relatively high-quality MAGs (@fig-mag_stats-1). However, only a small portion
+of those MAGs could be classified at the lower taxonomy levels, e.g. class and
+below (@fig-mag_stats-2). The larger number of "species" classified, is likely
+due to the presence of MAGs from previous studies deposited into the database.
+
+```{r create_ordering}
+## Create taxonomic order for downstream visualisation
+taxonomy_ordering <- c("superkingdom",
+                       "phylum", 
+                       "class", 
+                       "order" ,
+                       "family",
+                       "genus",
+                       "species"  
+                       )
+```
+
+```{r visualise_mag_stats}
+#| label: fig-mag_stats
+#| fig-cap: "Metagenomic assembled genome (MAG) statistics." 
+#| fig-subcap:
+#|   - "Proportion of MAGs based on completeness metrics."
+#|   - "Proportion of MAGs successfully classified on different taxonomic levels." 
+#| layout-ncol: 1
+mag_info %>% 
+  select("completeness_metric") %>% 
+  group_by(completeness_metric) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+ ggplot(aes(x = "", y = count, fill = completeness_metric)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y") +
+  geom_text(aes(label = count), position = position_stack(vjust = 0.5)) +
+  theme_void() +
+  theme(legend.title = element_blank()) 
+
+mag_info %>% 
+  select( 
+    c("genome", 
+      "superkingdom_score",
+      "phylum_score",
+      "class_score",
+      "order_score" ,
+      "family_score",
+      "genus_score",
+      "species_score" 
+      )
+  ) %>% 
+  pivot_longer(cols = c(
+      "superkingdom_score",
+      "phylum_score",
+      "class_score",
+      "order_score" ,
+      "family_score",
+      "genus_score",
+      "species_score"),
+               names_to = "taxonomy", 
+               values_to = "score"
+               ) %>% 
+  mutate(classified = ifelse(!is.na(score), "yes", "no")) %>% 
+  separate(taxonomy, into = "taxonomy", sep = "_") %>% 
+  group_by(taxonomy, classified) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+  mutate(proportion = (count/257)*100,
+         taxonomy = factor(taxonomy, levels = taxonomy_ordering)) %>% 
+  ggplot(aes(x = taxonomy, y = proportion, fill = classified)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = c("yes" = "darkgreen", "no" = "gray")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, 
+                                           margin = margin(t = 5, r = 0, b = 0, l = 0)))
+```
+```{r taxa_of_interest, eval = F}
+taxa_of_interest <- googlesheets4::read_sheet("https://docs.google.com/spreadsheets/d/1w5wCKSBxTwUp__m4_PcbmxbumGaY-9d90i75Gsb5DvQ/edit#gid=1591395475", sheet = "Taxa of interest")
+
+inner_join(taxa_of_interest %>% select(genus), mag_info, by = "genus")
+inner_join(taxa_of_interest %>% select(family), mag_info, by = "family")
+inner_join(taxa_of_interest %>% select(order), mag_info, by = "order")
+inner_join(taxa_of_interest %>% select(class), mag_info, by = "class")
+inner_join(taxa_of_interest %>% select(phylum), mag_info, by = "phylum")
+
+mag_info %>% filter(!is.na(species)) %>% filter(species != "no support")
+```
+```{r visualise_relab}
+## Function: Visualise relative abundance
+plot_relab_all_samples <- function(counts_table, taxonomy = "genus"){ 
+  taxonomy_sym <- sym(taxonomy)
+
+  counts_table %>% 
+    select(!!taxonomy_sym, sample_ID, count) %>%
+    group_by(!!taxonomy_sym, sample_ID) %>% 
+    summarise(count = sum(count)) %>% 
+    ungroup() %>% 
+    group_by(sample_ID) %>% 
+    filter(count >= 10000) %>% 
+    mutate(total_count_sample = sum(count)) %>% 
+    mutate(relab = count/total_count_sample) %>% 
+    ungroup() %>% 
+    
+    mutate(!!taxonomy_sym := ifelse(!!taxonomy_sym == "no support", NA, !!taxonomy_sym)) %>% 
+    ggplot(aes(x = sample_ID, y = relab, fill = !!taxonomy_sym) ) +
+    geom_bar(position = "stack", stat = "identity") +
+    theme(axis.text.x = element_text(angle = 90),
+          legend.position = "bottom")
+}
+
+plot_relab_all_samples(counts_table = mg_counts, taxonomy = "genus" )
+```
+
+## Metagenomics 
+@fig-mg_relab shows the metagenomic relative abundances of MAGs aggregated on
+different taxonomic levels. The large number of unknown taxa on the lower
+taxonomic levels (i.e. fig-mag_stats) is reflected in the respective
+relative abundance plots (e.g. fig-mg_relab-4).
+
+```{r prepare_mg_data}
+mg_counts <- 
+  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_MAG_counts.tsv") %>% 
+  pivot_longer(cols = 
+                 sample_info %>% select(sample_ID) %>% 
+                 separate(sample_ID, into = "sample_ID", sep = "_") %>% 
+                 distinct() %>% pull(sample_ID),
+               names_to = "sample_ID",
+               values_to = "count") %>% 
+  left_join(mag_info, by = c("MAG_ID" = "genome"))
+
+mg_tpm <- 
+  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metagenomics_MAG_TPM_counts.tsv") %>% 
+   pivot_longer(cols = 
+                 sample_info %>% select(sample_ID) %>% 
+                 separate(sample_ID, into = "sample_ID", sep = "_") %>% 
+                 distinct() %>% pull(sample_ID),
+               names_to = "sample_ID",
+               values_to = "count") %>% 
+  left_join(mag_info, by = c("MAG_ID" = "genome"))
+```
+
+```{r generate_mg_relab_plot}
+mg_relab <- list()
+for (i in 1:length(taxonomy_ordering)){ 
+  mg_relab[[i]] <- plot_relab_all_samples(counts_table = mg_counts, taxonomy = taxonomy_ordering[i])
+}
+```
+
+```{r visualise_mg_data}
+#| label: fig-mg_relab
+#| fig-cap: "Metagenomics relative abundance based on different taxonomic levels." 
+#| fig-subcap:
+#| - "Superkingdom"
+#| - "Phylum" 
+#| - "Class" 
+#| - "Order" 
+#| - "Family"
+#| - "Genus"
+#| - "Species"  
+#| layout-ncol: 1
+
+mg_relab[[1]]
+mg_relab[[2]]
+mg_relab[[3]]
+mg_relab[[4]]
+mg_relab[[5]]
+mg_relab[[6]]
+mg_relab[[7]]
+```
+## Metatranscrptomics
+@fig-mt_relab is the equivalent to @fig-mg_relab using metatranscriptomics
+data. It expectedly shows similar properties to the metagenomics relative
+abundance. However, the CI1 sample seems to contain a large amount of genus
+_Acidovorax_. This should be further inspected.
+
+```{r load_MAG_data}
+bakta2MAG_path <- '/scratch/users/snarayanasamy/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
+
+bakta2MAG <- sprintf('ssh iris "cat %s"', bakta2MAG_path ) %>%   
+  pipe() %>%  
+  read_tsv(col_names = c("MAG_ID", "Bakta_ID"))
+```
+
+```{r read_transcriptomics_data}
+mt_counts <- 
+  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_counts.tsv") %>% 
+  select(Bakta_ID, contains("_L00")) %>% 
+  pivot_longer(cols = sample_info %>% pull(sample_ID),
+               names_to = "sample_ID",
+               values_to = "count") %>% 
+  group_by(Bakta_ID, sample_ID) %>% 
+  summarise(count = sum(count, na.rm = T)) %>% 
+  ungroup() %>% 
+  distinct() %>% 
+  left_join(bakta2MAG, by = "Bakta_ID") %>% 
+  left_join(mag_info, by = c("MAG_ID" = "genome"))
+
+mt_tpm <- 
+  read_tsv("/Users/shaman.narayanasamy/Work/Data/KAUST/membrane_cleaning/metatranscriptomics_TPM_counts.tsv") %>% 
+  select(Bakta_ID, contains("_L00")) %>% 
+  pivot_longer(cols = sample_info %>% pull(sample_ID),
+               names_to = "sample_ID",
+               values_to = "count") %>% 
+  group_by(Bakta_ID, sample_ID) %>% 
+  summarise(count = sum(count, na.rm = T)) %>% 
+  ungroup() %>% 
+  distinct() %>% 
+  left_join(bakta2MAG, by = "Bakta_ID") %>% 
+  left_join(mag_info, by = c("MAG_ID" = "genome"))
+```
+
+```{r generate_mt_relab_plot}
+mt_relab <- list()
+for (i in 1:length(taxonomy_ordering)){ 
+  mt_relab[[i]] <- plot_relab_all_samples(counts_table = mt_counts, taxonomy = taxonomy_ordering[i])
+}
+```
+
+```{r visualise_mg_data}
+#| label: fig-mt_relab
+#| fig-cap: "Metatranscriptomics relative abundance based on different taxonomic levels. The quantification was based on transcript abundance (not the entire genome)." 
+#| fig-subcap:
+#| - "Superkingdom"
+#| - "Phylum" 
+#| - "Class" 
+#| - "Order" 
+#| - "Family"
+#| - "Genus"
+#| - "Species"  
+#| layout-ncol: 1
+
+mt_relab[[1]]
+mt_relab[[2]]
+mt_relab[[3]]
+mt_relab[[4]]
+mt_relab[[5]]
+mt_relab[[6]]
+mt_relab[[7]]
+```

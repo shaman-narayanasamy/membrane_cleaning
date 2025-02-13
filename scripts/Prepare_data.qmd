@@ -1,0 +1,306 @@
+---
+title: "Prepare data"
+author: "Shaman Narayanasamy"
+editor: source
+---
+
+```{r load_packages}
+library(tidyverse)
+library(rlang)
+```
+
+This script compiles the data before performing analyses.
+## Metatranscriptomics
+```{r read_sample_info, }
+quant_folder <-
+  '/ibex/scratch/projects/c2188/membrane_cleaning/output/metatranscriptomics/quantification/salmon/all'
+ 
+sample_table <- 
+  sprintf('ssh ibex "ls %s"', quant_folder) %>% pipe() %>% 
+  read_tsv(col_names = "folder") %>% 
+  separate(folder, into = c("sample", "lane", "tmp"), sep = '_', remove = F) %>% 
+  select(folder, sample, lane)
+```
+
+#### Compile raw counts
+```{r eval=FALSE, message=F, echo=F}
+## Raw counts
+for (f in 1:nrow(sample_table)){
+  sample_folder <- sample_table$folder[f] 
+  sample_name <- sample_table$folder[f] %>% str_remove("_quant")
+  print(sample_table$folder[f])
+
+  if (f == 1) { 
+    tmp <- 
+      sprintf('ssh ibex "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>% 
+      pipe() %>%  
+      read_tsv() %>% 
+      select(Name, Length, EffectiveLength, !!sample_name := NumReads)
+  }
+  else {
+      tmp <- 
+        sprintf('ssh ibex "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>%  
+        pipe() %>%   
+        read_tsv() %>%   
+        select(Name, !!sample_name := NumReads) %>%  
+        full_join(tmp, ., by = "Name")
+  }
+}
+
+counts <-
+  tmp %>% 
+  separate(Name, into = c("Bakta_ID"), sep = '_', remove = F, extra = "drop") %>% 
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_counts.tsv")
+
+rm(tmp)
+```
+
+#### Compile transcripts per million (TPM) normalised counts
+```{r eval=FALSE}
+## Transcripts per million (TPM) counts
+for (f in 1:nrow(sample_table)){
+  sample_folder <- sample_table$folder[f] 
+  sample_name <- sample_table$folder[f] %>% str_remove("_quant")
+  print(sample_table$folder[f])
+
+  if (f == 1) { 
+    tmp <- 
+      sprintf('ssh ibex "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>% 
+      pipe() %>%  
+      read_tsv() %>% 
+      select(Name, Length, EffectiveLength, !!sample_name := TPM)
+  }
+  else {
+      tmp <- 
+        sprintf('ssh ibex "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>%  
+        pipe() %>%   
+        read_tsv() %>%   
+        select(Name, !!sample_name := TPM) %>%  
+        full_join(tmp, ., by = "Name")
+  }
+}
+
+mt_tpm <-
+  tmp %>% 
+  separate(Name, into = c("Bakta_ID"), sep = '_', remove = F, extra = "drop") %>% 
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_TPM_counts.tsv")
+
+rm(tmp)
+```
+
+#### Bakta 2 MAG mappings
+```{r load_MAG_data}
+bakta2MAG_path <- '/ibex/scratch/projects/c2188/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
+
+bakta2MAG <- sprintf('ssh ibex "cat %s"', bakta2MAG_path ) %>%   
+  pipe() %>%  
+  read_tsv(col_names = c("MAG_ID", "Bakta_ID"))
+
+write_tsv(bakta2MAG, "/Users/naras0c/Work/data/membrane_cleaning/bakta2MAG_mappings.tsv")
+```
+```{r}
+counts <-
+  read_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_counts.tsv")
+
+counts %>% 
+  select(-Length, -EffectiveLength, -Name) %>% 
+  pivot_longer(-Bakta_ID, names_to = "sample_ID", values_to = "count") %>% 
+  group_by(Bakta_ID, sample_ID) %>% 
+  mutate(count = sum(count)) %>% 
+  ungroup() %>% 
+  group_by(sample_ID) %>% 
+  mutate(total_count_sample = sum(count)) %>% 
+  mutate(relab = count/total_count_sample * 100) %>% 
+  ungroup() %>% 
+
+```
+
+## Metagenomics
+```{r eval=FALSE}
+## Define the folder containing count data within the HPC
+quant_folder <-
+  '/ibex/scratch/projects/c2188/membrane_cleaning/output/metagenomics/quantification/salmon/all'
+
+sample_table <- 
+  sprintf('ssh ibex "ls %s"', quant_folder) %>% pipe() %>% 
+  read_tsv(col_names = "folder") %>% 
+  separate(folder, into = c("sample", "lane", "tmp"), sep = '_', remove = F) %>% 
+  select(folder, sample, lane)
+```
+
+
+```{r eval=FALSE}
+## Raw counts
+for (f in 1:nrow(sample_table)){
+  sample_folder <- sample_table$folder[f] 
+  sample_name <- sample_table$folder[f] %>% str_remove("_quant")
+  print(sample_table$folder[f])
+
+  if (f == 1) { 
+    tmp <- 
+      sprintf('ssh ibex "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>% 
+      pipe() %>%  
+      read_tsv() %>% 
+      select(Name, Length, EffectiveLength, !!sample_name := NumReads)
+  }
+  else {
+      tmp <- 
+        sprintf('ssh ibex "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>%  
+        pipe() %>%   
+        read_tsv() %>%   
+        select(Name, !!sample_name := NumReads) %>%  
+        full_join(tmp, ., by = "Name")
+  }
+}
+
+tmp %>%  
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_contig_counts.tsv")
+
+mg_counts <-
+  tmp %>%  
+  separate(Name, into = c("MAG_ID"), sep = '_c_', remove = T, extra = "drop") %>%  
+  pivot_longer(cols = c(sample_table %>% pull(sample)),
+                 names_to = "sample_ID",
+                 values_to = "count") %>% 
+  group_by(MAG_ID, sample_ID) %>% 
+  summarise(count = sum(count)) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = MAG_ID, 
+              names_from = sample_ID, 
+              values_from = count) %>% 
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_MAG_counts.tsv")
+
+rm(tmp)
+```
+#### Compile transcripts per million (TPM) normalised counts
+```{r eval=FALSE}
+## Transcripts per million (TPM) counts
+for (f in 1:nrow(sample_table)){
+  sample_folder <- sample_table$folder[f] 
+  sample_name <- sample_table$folder[f] %>% str_remove("_quant")
+  print(sample_table$folder[f])
+
+  if (f == 1) { 
+    tmp <- 
+      sprintf('ssh ibex "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>% 
+      pipe() %>%  
+      read_tsv() %>% 
+      select(Name, Length, EffectiveLength, !!sample_name := TPM)
+  }
+  else {
+      tmp <- 
+        sprintf('ssh ibex "cat %s"', paste(quant_folder, sample_folder, "quant.sf", sep = '/')) %>%  
+        pipe() %>%   
+        read_tsv() %>%   
+        select(Name, !!sample_name := TPM) %>%  
+        full_join(tmp, ., by = "Name")
+  }
+}
+
+tmp %>%  
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_contig_TPM_counts.tsv")
+
+mg_tpm <-
+  tmp %>%  
+  separate(Name, into = c("MAG_ID"), sep = '_c_', remove = T, extra = "drop") %>%  
+  pivot_longer(cols = c(sample_table %>% pull(sample)),
+                 names_to = "sample_ID",
+                 values_to = "count") %>% 
+  group_by(MAG_ID, sample_ID) %>% 
+  summarise(count = sum(count)) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = MAG_ID, 
+              names_from = sample_ID, 
+              values_from = count) %>% 
+  write_tsv("/Users/naras0c/Work/data/membrane_cleaning/metagenomics_MAG_TPM_counts.tsv")
+
+rm(tmp)
+```
+
+## Prepare MAG data
+```{r read_drep_results}
+drep_table <- 
+  '/ibex/scratch/projects/c2188/membrane_cleaning/output/dereplication/all/dereplicated_bins/data_tables/Widb.csv' %>% 
+  sprintf('ssh ibex "cat %s"', .) %>% 
+  pipe() %>% 
+  read_csv() %>% 
+  mutate(genome = str_replace_all(genome, ".fasta", "")) 
+```
+### GTDB
+```{r read_gtdb_results}
+bat_table <- 
+  '/ibex/user/naras0c/membrane_cleaning/output/annotation_gtdb_onlyOfficial/all/catbat/gtdb/BAT.bin2classification.txt' %>% 
+  sprintf('ssh ibex "cat %s"', .) %>% 
+  pipe() %>% 
+  read_tsv() %>% 
+  rename(genome = `# bin`) %>% 
+  separate(lineage, into = c("root", 
+                              "superkingdom", 
+                              "phylum", 
+                              "class",
+                              "order",
+                              "family",
+                              "genus",
+                              "species"),
+            sep = ";") %>% 
+  separate(superkingdom, sep = '__', into = c("tmp0", "superkingdom")) %>% 
+  separate(phylum, sep = '__', into = c("tmp0", "phylum")) %>% 
+  separate(class, sep = '__', into = c("tmp1", "class")) %>% 
+  separate(order, sep = '__', into = c("tmp2", "order")) %>% 
+  separate(family, sep = '__', into = c("tmp3", "family")) %>% 
+  separate(genus, sep = '__', into = c("tmp4", "genus")) %>% 
+  separate(species, sep = '__', into = c("tmp5", "species")) %>% 
+  select(-starts_with("tmp"), -root) %>% 
+  separate(`lineage scores (f: 0.30)`, into = c("root", 
+                              "superkingdom_score", 
+                              "phylum_score", 
+                              "class_score",
+                              "order_score",
+                              "family_score",
+                              "genus_score",
+                              "species_score"),
+            sep = ";") %>% 
+  mutate(genome = str_replace_all(genome, ".fasta", "")) %>% 
+  filter(!duplicated(genome)) 
+```
+
+```{r}
+mag_info <- 
+  inner_join(drep_table, bat_table, by = "genome") %>% 
+  select(genome, completeness, contamination, size, N50, completeness_metric, contamination_metric, superkingdom, phylum, class, order, family, genus, species, contains("_score"))
+```
+
+```{r write_mag_info_table, eval = F}
+write_tsv(mag_info, "/Users/naras0c/Work/data/membrane_cleaning/dereplicated_refined_MAG_information-gtdb.tsv")
+```
+
+### NCBI
+```{r read_ncbi_results}
+bat_table <- 
+  '/ibex/scratch/projects/c2188/membrane_cleaning/output/annotation/all/catbat/BAT.bin2classification.names_added.txt' %>% 
+  sprintf('ssh ibex "cat %s"', .) %>% 
+  pipe() %>% 
+  read_tsv() %>% 
+  rename(genome = `# bin`) %>% 
+  mutate(genome = str_replace_all(genome, ".fasta", "")) %>% 
+  filter(!duplicated(genome)) 
+```
+
+```{r}
+mag_info <- 
+  inner_join(drep_table, bat_table, by = "genome") %>% 
+  select(genome, completeness, contamination, size, N50, completeness_metric, contamination_metric, superkingdom, phylum, class, order, family, genus, species) %>% 
+  separate(superkingdom, sep = ': ', into = c("superkingdom", "superkingdom_score")) %>% 
+  separate(phylum, sep = ': ', into = c("phylum", "phylum_score")) %>% 
+  separate(class, sep = ': ', into = c("class", "class_score")) %>% 
+  separate(order, sep = ': ', into = c("order", "order_score")) %>% 
+  separate(family, sep = ': ', into = c("family", "family_score")) %>% 
+  separate(genus, sep = ': ', into = c("genus", "genus_score")) %>% 
+  separate(species, sep = ': ', into = c("species", "species_score")) %>% 
+  mutate(genome = str_replace_all(genome, ".fasta", "")) %>% 
+  filter(!duplicated(genome)) 
+```
+
+```{r write_mag_info_table, eval = F}
+write_tsv(mag_info, "/Users/naras0c/Work/data/membrane_cleaning/dereplicated_refined_MAG_information-ncbi.tsv")
+```

@@ -17,10 +17,11 @@ tmp_dir = os.environ.get("tmp_dir", config['tmp_dir'])
 condition = CONDITION
 
 ## Define input directory
-input_dir = os.path.join("/scratch/users/snarayanasamy/membrane_cleaning/output/dereplication", condition)
+input_dir = os.path.join("/ibex/scratch/projects/c2188/membrane_cleaning/output/dereplication", condition)
 
 ## Define output directory
-output_dir = os.path.join("/scratch/users/snarayanasamy/membrane_cleaning/output/annotation", condition)
+#output_dir = os.path.join("/ibex/scratch/projects/c2188/membrane_cleaning/output/annotation_2", condition)
+output_dir = os.path.join("/ibex/user/naras0c/membrane_cleaning/output/annotation_gtdb_onlyOfficial", condition)
 
 ## Get path to directory containing all the bins
 bin_directory = os.path.join(input_dir, "dereplicated_bins/dereplicated_genomes")
@@ -43,7 +44,8 @@ include:
 rule all:
     input:
         expand("bakta/{bin_id}/bakta.done", bin_id=bin_ids),
-        "catbat/catbat.done",
-        "catbat/catbat_summary.done"
+        expand("catbat/{db_name}/catbat.done", db_name=["gtdb", "nr"]),
+        expand("catbat/{db_name}/catbat_summary.done", db_name=["gtdb", "nr"]),
+        expand("catbat/{db_name}/BAT.bin2classification.txt", db_name=["gtdb", "nr"])
     output:
         touch("annotation.done")

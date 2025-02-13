@@ -1,13 +1,13 @@
 ---
 tmp_dir: "/tmp"
-input_dir_binning: "/scratch/users/snarayanasamy/membrane_cleaning"
-output_dir: "/scratch/users/snarayanasamy/membrane_cleaning/output"
-input_dir_dereplication: "/scratch/users/snarayanasamy/membrane_cleaning/output/binning"
-sample_info: "/scratch/users/snarayanasamy/membrane_cleaning/sample_info.txt"
-mt_data_table: "/scratch/users/snarayanasamy/membrane_cleaning/mt_sample_info.txt"
-test_mt_data_table: "/scratch/users/snarayanasamy/membrane_cleaning/test_mt_sample_info.txt"
+input_dir_binning: "/ibex/scratch/projects/c2188/membrane_cleaning"
+output_dir: "/ibex/scratch/projects/c2188/membrane_cleaning/output"
+input_dir_dereplication: "/ibex/scratch/projects/c2188/membrane_cleaning/output/binning"
+sample_info: "/ibex/scratch/projects/c2188/membrane_cleaning/sample_info.txt"
+mt_data_table: "/ibex/scratch/projects/c2188/membrane_cleaning/mt_sample_info.txt"
+test_mt_data_table: "/ibex/scratch/projects/c2188/membrane_cleaning/test_mt_sample_info.txt"
 bins_config: "config/bins_config.yml"
-bin_annotation_path: "/scratch/users/snarayanasamy/membrane_cleaning/output/annotation/all/bakta/"
+bin_annotation_path: "/ibex/scratch/projects/c2188/membrane_cleaning/output/annotation/all/bakta/"
 
 magscot:
     folder: "/home/users/snarayanasamy/repositories/github/MAGScoT"        
@@ -28,14 +28,23 @@ bakta:
     db_path: "/mnt/lscratch/users/snarayanasamy/bakta/db"
 
 catbat:
-    db_path: "/scratch/users/snarayanasamy/catbat/CAT_prepare_20210107/2021-01-07_CAT_database"
-    tx_path: "/scratch/users/snarayanasamy/catbat/CAT_prepare_20210107/2021-01-07_taxonomy"
+    threads: 40
+    db_path:
+      gtdb: "/ibex/reference/KSL/cat/20231120/20231120_CAT_gtdb/db"
+      nr: "/ibex/reference/KSL/cat/20231120/20231120_CAT_nr/db"
+    tx_path:
+      gtdb: "/ibex/reference/KSL/cat/20231120/20231120_CAT_gtdb/tax"
+      nr: "/ibex/reference/KSL/cat/20231120/20231120_CAT_nr/tax"
+    catpack_script: "/home/naras0c/repositories/github/CAT_pack/CAT_pack/CAT_pack"
 
 trimmomatic:
-    adapters_path: "/scratch/users/snarayanasamy/membrane_cleaning/MT/adapters.fa"
+    adapters_path: "/ibex/scratch/projects/c2188/membrane_cleaning/MT/adapters.fa"
 
 sortmerna:
     db_path: "/scratch/users/snarayanasamy/sortmerna"
 
 salmon:
     min_assigned_frags: 1
+
+gtdbtk:
+    db_path: "/ibex/reference/KSL/gtdb-tk/release214"

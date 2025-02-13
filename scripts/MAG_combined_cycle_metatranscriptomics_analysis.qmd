@@ -1,0 +1,783 @@
+---
+title: "MAG_combined_cycle_metatranscriptomics_analysis"
+author: "Shaman Narayanasamy"
+format: html
+editor: source
+execute:
+  echo: false 
+  warning: false
+  message: false
+params:
+  root_dir: "/Users/naras0c/Work/data/membrane_cleaning"
+  mag_id: "TI2_MAGScoT_cleanbin_000074"
+---
+```{r load packages}
+library(tidyverse)
+library(tidyHeatmap)
+library(tidySummarizedExperiment)
+library(tidybulk)
+library(ggvenn)
+library(UpSetR)
+library(wordcloud)
+library(wordcloud2)
+library(tm)
+```
+
+```{r setup}
+root_dir <- params$root_dir
+mag_id <- params$mag_id
+```
+```{r load_sample_information}
+sample_info <- 
+  read_tsv('/Users/naras0c/Work/data/membrane_cleaning/mt_sample_info.txt', comment = "#") %>% 
+  mutate(sample_ID = paste(sample, lane, sep = '_'),
+         lane = as.numeric(str_extract(lane, "\\d+"))) %>% 
+  select(sample_ID, cycle = replicate, everything(), -sample, -R1, -R2) 
+
+annotation_folder <- '/ibex/scratch/projects/c2188/membrane_cleaning/output/annotation/all/bakta/'
+
+MAG_annotation <- 
+  sprintf('ssh ibex "cat %s"', paste(annotation_folder, mag_id, paste0(mag_id, ".tsv"), sep = '/')) %>%  
+  pipe() %>%   
+  read_tsv(comment = "#", col_names = F) %>% 
+  select(feature = X6, type = X2, gene_symbol = X7, gene_function = X8, gene_IDs = X9, contig = X1, start = X3, end = X4 ) %>% 
+  filter(!is.na(feature))
+
+bakta2MAG_path <- '/ibex/scratch/projects/c2188/membrane_cleaning/output/metatranscriptomics/quantification/bin2bakta_id_mappings.tsv'
+
+bakta2MAG <- sprintf('ssh ibex "cat %s"', bakta2MAG_path ) %>%   
+  pipe() %>%  
+  read_tsv(col_names = c("MAG_ID", "Bakta_ID"))
+
+Bakta_IDs_of_interest <- 
+  filter(bakta2MAG, MAG_ID %in% c(mag_id)) %>% pull(Bakta_ID)
+```
+```{r select_features_from_MAG}
+counts <- 
+  read_tsv("/Users/naras0c/Work/data/membrane_cleaning/metatranscriptomics_counts.tsv")
+
+counts <- 
+  counts %>%  
+  inner_join(MAG_annotation, by = c("Name" = "feature")) %>% 
+  pivot_longer(
+    cols = sample_info %>% pull(sample_ID),
+    names_to = "sample_ID", 
+    values_to = "counts") %>% 
+  left_join(sample_info, by = "sample_ID") %>% 
+  separate(sample_ID, into = c("SampleName"), sep = '_', remove = F, extra = "drop") %>% 
+  mutate(SampleName = str_remove(SampleName, "\\d+")) %>% 
+  select(feature = Name, 
+         sample = sample_ID, 
+         counts, 
+         SampleName, 
+         condition, 
+         phase, 
+         cycle, 
+         lane, 
+         Run = sample_ID, 
+         avgLength = EffectiveLength) %>% 
+  as_SummarizedExperiment(.sample = sample,
+                          .transcript = feature,
+                          .abundance = counts)
+
+# Step 1: Count the number of samples where each gene is expressed (read count >= 1)
+expressed_counts <- counts %>%
+  group_by(feature) %>%
+  summarize(expressed_in_samples = sum(counts >= 1))
+
+# Step 2: Calculate the total number of samples
+total_samples <- counts$sample %>% unique() %>% length() # excluding the gene_id column
+
+# Step 3: Filter genes that are expressed in at least 10% of the samples
+expressed_genes <- expressed_counts %>%
+  filter(expressed_in_samples >= (0.1 * total_samples))
+
+# Step 4: Count the number of such genes
+number_of_expressed_genes <- nrow(expressed_genes)
+
+# Display the result
+number_of_expressed_genes
+```
+```{r}
+counts %>% 
+  select(feature = .feature, counts, sample = .sample) %>% 
+  right_join(expressed_genes, by = "feature") %>% 
+  select(-expressed_in_samples) %>% 
+  summary()
+```
+
+
+```{r list_all_DEG_files}
+file_list <- list.files(root_dir, pattern = c(mag_id)) %>%
+  as_tibble() %>% 
+  filter(!grepl("-2FC_0.05FDR_withAnnotation.tsv", value)) %>% 
+  pull(value)
+```
+
+```{r read_all_DEG_files}
+for (f in 1:length(file_list)) {
+  
+  info <- 
+    file_list[f] %>% 
+    str_split_fixed(., "-", 4) %>% 
+    .[,c(2,3)] %>% 
+    as_tibble()
+  
+  cycle_id <- info[1,] %>% str_split_fixed(., "_", 2) %>% .[,2]
+  
+  phase <- info[2,] %>% str_split_fixed(., "_", 2) %>% .[,1]
+    
+  tmp <- read_tsv(paste(root_dir, file_list[f], sep = "/")) %>% 
+    mutate(cycle = cycle_id, phase = phase)
+  
+ if (f == 1) {
+   
+   deg_all <- tmp
+   
+ } else {
+   
+   deg_all <- bind_rows(deg_all, tmp) 
+   
+ }
+  
+  rm(tmp, cycle_id, phase, info)
+  
+}
+
+## Filter out features that have less than 2 non-NA adjusted p-values and 
+## each must have at least one non-NA in the DEGs from raw counts and 
+## housekeeping gene scaled data.
+
+raw_padj_cols <- c("raw_DESeq2_padj", 
+                   "raw_edgerQLT_FDR", 
+                   "raw_edgerLR_FDR", 
+                   "raw_voom_adj.P.Val")
+
+hkg_padj_cols <- c("hkg_DESeq2_padj", 
+                   "hkg_edgerQLT_FDR", 
+                   "hkg_edgerLR_FDR", 
+                   "hkg_voom_adj.P.Val")
+
+deg_all <- 
+  deg_all %>%
+  # Retain only the features that were consistent in terms of directionality
+  rowwise() %>% 
+  mutate( 
+    # Check for at least 2 non-NA adjusted p-values
+    at_least_2_non_na_adj_pval =  
+      sum(!is.na(c_across(all_of(raw_padj_cols))),
+          !is.na(c_across(all_of(hkg_padj_cols)))) >= 2,  
+    # Ensure at least one non-NA adjusted p-value from raw counts
+    at_least_1_non_na_adj_pval_from_raw_counts = any(!is.na(c_across(all_of(raw_padj_cols)))), 
+    # Ensure at least one non-NA adjusted p-value from HKG counts
+    at_least_1_non_na_adj_pval_from_hkg_counts = any(!is.na(c_across(all_of(hkg_padj_cols))))
+  ) %>%
+  ungroup() %>% 
+  select(feature, everything()) %>% 
+  mutate(is.significant = 
+           case_when(
+             composite_p_val_fisher_fdr <= 0.05 &
+               composite_p_val_fisher_BH <= 0.05 &
+               composite_p_val_fisher_BY <= 0.05 &
+               composite_p_val_fisher_bonferroni <= 0.05 &
+               composite_p_val_stouffer_fdr <= 0.05 &
+               composite_p_val_stouffer_BH <= 0.05 &
+               composite_p_val_stouffer_BY <= 0.05 &
+               composite_p_val_stouffer_bonferroni <= 0.05
+               ~ TRUE,
+             TRUE ~ FALSE
+           )) %>% 
+   mutate(significant = 
+           case_when(
+             is.significant == TRUE ~ "*",
+             TRUE ~ ""
+           )) 
+
+deg_all %>% pull(feature) %>% unique() %>% length()
+```
+```{r}
+deg_all %>% 
+  arrange(desc(abs(raw_DESeq2_log2FoldChange)), composite_p_val_fisher) %>% 
+  select(feature, phase, cycle, raw_DESeq2_log2FoldChange, starts_with("composite_")) %>% left_join(MAG_annotation %>% select(feature,gene_function), by = "feature") %>% 
+  select(feature, gene_function, everything()) %>% 
+  distinct() %>% 
+  group_by(phase, cycle) %>% 
+  summarise(no_of_degs = n())
+```
+
+```{r get_sig_DEGs}
+## Filter genes that are significant and have at least 2 FC
+deg_sig <- 
+  deg_all %>%   
+  filter( 
+    at_least_2_non_na_adj_pval == TRUE &  
+      at_least_1_non_na_adj_pval_from_raw_counts == TRUE &
+      at_least_1_non_na_adj_pval_from_hkg_counts == TRUE &     
+      is.significant == TRUE &    
+      raw_DESeq2_log2FoldChange >= log2(2) |  
+      raw_DESeq2_log2FoldChange <= log2(0.5)) 
+
+deg_sig %>% pull(feature) %>% unique() %>% length()
+```
+
+```{r get_sig_DEGs}
+deg_sig %>% 
+  arrange(desc(abs(raw_DESeq2_log2FoldChange)), composite_p_val_fisher) %>% 
+  select(feature, phase, cycle, raw_DESeq2_log2FoldChange, starts_with("composite_")) %>% left_join(MAG_annotation %>% select(feature,gene_function), by = "feature") %>% 
+  select(feature, gene_function, everything()) %>% 
+  distinct() %>% 
+  group_by(phase, cycle) %>% 
+  summarise(no_of_significant = n())
+```
+
+```{r intersection_all}
+## Prepare list
+  initial_1 <-
+  deg_all %>% 
+  filter(phase == "initial" & cycle == 1) %>% 
+  pull(feature) 
+
+  initial_2 <-
+  deg_all %>% 
+  filter(phase == "initial" & cycle == 2) %>% 
+  pull(feature) 
+  
+  initial_3 <-
+  deg_all %>% 
+  filter(phase == "initial" & cycle == 3) %>% 
+  pull(feature) 
+
+  backflush_1 <-
+  deg_all %>% 
+  filter(phase == "backflush" & cycle == 1) %>% 
+  pull(feature) 
+  
+  backflush_2 <-
+  deg_all %>% 
+  filter(phase == "backflush" & cycle == 2) %>% 
+  pull(feature) 
+  
+  backflush_3 <-
+  deg_all %>% 
+  filter(phase == "backflush" & cycle == 3) %>% 
+  pull(feature) 
+
+  phase_lists <- list(
+    "initial_1" = initial_1,  
+    "initial_2" = initial_2,  
+    "initial_3" = initial_3,  
+    "backflush_1" = backflush_1,
+    "backflush_2" = backflush_2,
+    "backflush_3" = backflush_3
+    )
+
+  upset(fromList(phase_lists))
+  
+unlist(phase_lists) %>% 
+  as_tibble() %>% 
+    distinct() %>% 
+    pull(value) %>% 
+    length()
+```
+
+```{r intersection_sig}
+## Prepare list
+  initial_1 <-
+  deg_sig %>% 
+  filter(phase == "initial" & cycle == 1) %>% 
+  pull(feature) 
+
+  initial_2 <-
+  deg_sig %>% 
+  filter(phase == "initial" & cycle == 2) %>% 
+  pull(feature) 
+  
+  initial_3 <-
+  deg_sig %>% 
+  filter(phase == "initial" & cycle == 3) %>% 
+  pull(feature) 
+
+  backflush_1 <-
+  deg_sig %>% 
+  filter(phase == "backflush" & cycle == 1) %>% 
+  pull(feature) 
+  
+  backflush_2 <-
+  deg_sig %>% 
+  filter(phase == "backflush" & cycle == 2) %>% 
+  pull(feature) 
+  
+  backflush_3 <-
+  deg_sig %>% 
+  filter(phase == "backflush" & cycle == 3) %>% 
+  pull(feature) 
+
+  phase_lists <- list(
+    "initial_1" = initial_1,  
+    "initial_2" = initial_2,  
+    "initial_3" = initial_3,  
+    "backflush_1" = backflush_1,
+    "backflush_2" = backflush_2,
+    "backflush_3" = backflush_3
+    )
+
+  upset(fromList(phase_lists))
+  
+  unlist(phase_lists) %>% as_tibble() %>% 
+    distinct() %>% 
+    pull(value) %>% 
+    length()
+```
+```{r define_colours}
+# Color palette for sequencing lanes
+lane_colours <- c(
+  "1" = "#ADD8E6", # Light Blue
+  "2" = "#1E90FF"  # Dodger Blue
+)
+
+# Color palette for cycles
+cycle_colours <- c(
+  "1" = "#98FB98", # Pale Green
+  "2" = "#32CD32", # Lime Green
+  "3" = "#006400"  # Dark Green
+)
+```
+
+```{r construct_top_degs_list}
+deg_sig_initial_list <- 
+  deg_sig %>% filter(phase == "initial") %>%  
+  pull(feature) %>% unique() %>% .[1:25]
+
+deg_sig_backflush_list <- 
+  deg_sig %>% filter(phase == "backflush") %>%  
+  pull(feature) %>% unique() %>% .[1:25]
+```
+
+```{r heatmap_significant_initial, fig.height=6, fig.width = 5}
+counts %>%
+  as_tibble() %>%
+  filter(.feature %in% deg_sig_initial_list) %>%
+  mutate(.feature = factor(.feature, levels = deg_sig_initial_list)) %>% 
+
+  left_join(MAG_annotation, by = "feature") %>% 
+  mutate(custom_name = paste(feature, gene_function, sep = ":")) %>% 
+  mutate(lane = as.character(lane)) %>% 
+  mutate(cycle = as.character(cycle)) %>% 
+  filter(phase == "initial") %>%  
+
+  heatmap(
+    .column = sample,
+    .row = custom_name,
+    .value = counts,
+    transform = log1p,
+    name = "count",
+    cluster_rows = FALSE,
+    cluster_columns = FALSE
+  ) %>%
+  annotation_tile(cycle, palette = cycle_colours) %>% 
+  annotation_tile(lane, palette = lane_colours) 
+```
+```{r heatmap_significant_backflush, fig.height=6, fig.width = 5}
+counts %>% 
+  as_tibble() %>%
+  filter(.feature %in% deg_sig_backflush_list) %>%
+  mutate(.feature = factor(.feature, levels = deg_sig_backflush_list)) %>% 
+
+  left_join(MAG_annotation, by = "feature") %>% 
+  mutate(custom_name = paste(feature, gene_function, sep = ":")) %>% 
+  mutate(lane = as.character(lane)) %>% 
+  mutate(cycle = as.character(cycle)) %>% 
+  filter(phase == "backflush") %>%  
+
+  heatmap(
+    .column = sample,
+    .row = custom_name,
+    .value = counts,
+    transform = log1p,
+    name = "count",
+    cluster_rows = FALSE,
+    cluster_columns = FALSE
+  ) %>%
+  annotation_tile(cycle, palette = cycle_colours) %>% 
+  annotation_tile(lane, palette = lane_colours) 
+```
+```{r heatmap_foldchange_initial, fig.height = 6, fig.width=6}
+deg_all %>% 
+  as_tibble() %>%
+  filter(feature %in% deg_sig_initial_list) %>%
+  mutate(feature = factor(feature, levels = deg_sig_initial_list)) %>% 
+
+  left_join(MAG_annotation, by = "feature") %>% 
+  mutate(custom_name = paste(feature, gene_function, sep = ":")) %>% 
+  mutate(custom_phase = paste(phase, cycle, sep = ":")) %>%
+  filter(raw_DESeq2_log2FoldChange >= log2(2) | raw_DESeq2_log2FoldChange <= log2(0.5)) %>% 
+  select(feature, everything()) %>% 
+  filter(phase == "initial") %>% 
+
+# create heatmap
+  heatmap(
+    .column = cycle,
+    .row = custom_name,
+    .value = raw_DESeq2_log2FoldChange,
+    cluster_rows = FALSE,
+    cluster_columns = FALSE,
+    palette_value = circlize::colorRamp2(c(-4, -2, 0, 2, 4), viridis::magma(5))
+  ) %>%
+  layer_text(.value = significant)
+```
+```{r heatmap_foldchange_backflush, fig.height = 4, fig.width=10}
+deg_all %>% 
+  as_tibble() %>%
+  filter(feature %in% deg_sig_backflush_list) %>%
+  mutate(feature = factor(feature, levels = deg_sig_backflush_list)) %>% 
+
+  left_join(MAG_annotation, by = "feature") %>% 
+  mutate(custom_name = paste(feature, gene_function, sep = ":")) %>% 
+  mutate(custom_phase = paste(phase, cycle, sep = ":")) %>%
+  filter(raw_DESeq2_log2FoldChange >= log2(2) | raw_DESeq2_log2FoldChange <= log2(0.5)) %>% 
+  select(feature, everything()) %>% 
+  filter(phase == "backflush") %>% 
+
+# create heatmap
+  heatmap(
+    .column = cycle,
+    .row = custom_name,
+    .value = raw_DESeq2_log2FoldChange,
+    cluster_rows = FALSE,
+    cluster_columns = FALSE,
+    palette_value = circlize::colorRamp2(c(-4, -2, 0, 2, 4), viridis::magma(5))
+  ) %>%
+  layer_text(.value = significant)
+```
+```{r write_all_degs, eval = F}
+deg_all %>% 
+  left_join(MAG_annotation, by = "feature") %>% #colnames()
+  select(gene_ID = feature, 
+         gene_symbol, 
+         gene_function, 
+         avgLength,
+         phase,
+         cycle,
+         starts_with("composite_"),  
+         "significant_count",
+         "non_na_count",
+         "significant_proportion",
+         "at_least_2_non_na_adj_pval",
+         "at_least_1_non_na_adj_pval_from_raw_counts",
+         "at_least_1_non_na_adj_pval_from_hkg_counts",
+         "is.significant",
+         "significant",
+         everything()
+         ) %>% 
+  write_tsv('/Users/naras0c/Work/data/membrane_cleaning/all_degs.txt')
+
+```
+
+```{r}
+#Below are a list of some genes and gene categories commonly associated with
+#biofilm formation in bacteria:
+#
+#1. Adhesion Molecules and Surface Proteins:
+#
+#- fimH, flp, pilA: Typically involved in pilus formation.
+#- bap (Biofilm-associated protein): Common in Staphylococcus spp.
+#- icaA, icaD (InterCellular Adhesin): Important in polysaccharide intercellular adhesin (PIA) production, especially in Staphylococcus epidermidis.
+#
+#2. Exopolysaccharide (EPS) Synthesis Genes:
+#
+#- psl, pel: Genes in Pseudomonas aeruginosa for EPS production.
+#- vps (vibrio polysaccharide synthesis genes): Found in Vibrio spp.
+#
+#3. Quorum Sensing (QS) System Genes:
+#
+#- luxI, luxR: Autoinducer synthase and receptor genes in Vibrio spp.
+#- agrA-D (Accessory gene regulator): Important in Staphylococcus aureus.
+#- lasI, lasR, rhlI, rhlR: Key QS genes in Pseudomonas aeruginosa.
+#
+#4. Genes Regulating c-di-GMP Levels:
+#
+#- cdgA, cdgB, cdgC: Genes regulating cyclic di-GMP, a second messenger in biofilm formation.
+#
+#5. Stress Response and Tolerance Genes:
+#
+#- rpoS (Sigma S factor): Involved in stress response, common in E. coli.
+#- cspD: Cold shock protein, can be involved in biofilm formation under stress conditions.
+#
+#6. Motility and Chemotaxis Genes:
+#
+#- flg, fli, mot: Flagellar assembly genes.
+#- cheA, cheY: Chemotaxis genes.
+#
+#The gene symbols are complied into a list and are searched through the annotations.
+#
+#7. Suggested by PYH:
+#
+#- "extracellular polymeric substances"
+#- "polysaccharide synthesis"
+#- "formation"
+
+biofilm_genes <- c("fimH", "flp", "pilA", "bap", "icaA", "icaB", "icaC", "icaD", 
+                   "psl", "pel", "vps", "luxI", "luxR", "agrA", "agrB", 
+                   "agrC", "agrD", "lasI", "lasR", "rhlI", "rhlR", 
+                   "cdgA", "cdgB", "cdgC", "rpoS", "cspD", "flg", 
+                   "fli", "mot", "cheA", "cheY", "fnbA", "fnbB",
+                   "clfA", "clfB", "fib", "epbs", "eno", "cna")
+
+keywords <- c("Biofilm", "Quorum sensing", "Adhesion", "Exopolysaccharide",
+"Motility", "Flagella", "Pili", "Extracellular", "matrix", "polymeric
+substance", "formation", "polysaccharide synthesis")
+
+pattern <- paste(keywords, collapse = "|")
+
+gene_function_text <- 
+  MAG_annotation %>% 
+  filter(grepl(pattern, gene_function, ignore.case = TRUE)) %>% 
+  inner_join(deg_all, by = "feature") %>% 
+  mutate(
+    gene_function = str_replace(gene_function, "/", " "),
+    gene_function = str_replace(gene_function, "-", " "),
+    gene_function = str_replace(gene_function, "-", " ")
+    ) %>% 
+  pull(gene_function)
+```
+
+
+```{r}
+word_matrix <- 
+  Corpus(VectorSource(gene_function_text)) %>% 
+#  tm_map(toSpace, "-") %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace) %>% 
+  tm_map(content_transformer(tolower)) %>%  
+  tm_map(removeWords, stopwords("english")) %>% 
+  tm_map(removeWords, "protein") %>% 
+  tm_map(removeWords, "containing") %>% 
+  TermDocumentMatrix() %>% 
+    as.matrix() 
+
+words <- sort(rowSums(word_matrix),decreasing=TRUE) 
+  
+word_dat <- data.frame(word = names(words),freq=words)
+
+set.seed(1234) # for reproducibility 
+
+wordcloud(words = word_dat$word, 
+          freq = word_dat$freq, 
+          min.freq = 1,           
+          max.words=200, 
+          random.order=FALSE, 
+          rot.per=0.35,            
+          colors=brewer.pal(8, "Dark2"))
+    
+```
+
+
+```{r}
+deg_list_biofilm <- 
+  MAG_annotation %>% 
+  filter(grepl(pattern, gene_function, ignore.case = TRUE)) %>% 
+  inner_join(deg_all, by = "feature") %>% 
+  pull(feature) %>% 
+  unique()
+```
+
+```{r heatmap_significant_initial_biofilm, fig.height=7, fig.width = 8}
+counts %>%
+  as_tibble() %>%
+  filter(.feature %in% deg_list_biofilm) %>%
+  mutate(.feature = factor(.feature, levels = deg_list_biofilm)) %>% 
+
+  left_join(MAG_annotation, by = "feature") %>% 
+  separate(feature, sep = "_", into = c(NA, "gene_ID")) %>% 
+
+  mutate( `Gene ID:Function` = paste(gene_ID, gene_function, sep = ":")) %>% 
+  mutate(lane = as.character(lane)) %>% 
+  mutate(cycle = as.character(cycle)) %>% 
+  mutate(`Sample` = paste(condition, "cycle", cycle, "lane", lane)) %>%
+  filter(phase == "initial") %>%  
+  group_by(condition) %>% 
+
+  heatmap(
+    .column = Sample,
+    .row = `Gene ID:Function`,
+    .value = counts,
+    transform = log1p,
+    name = "log(count + 1)",
+    cluster_rows = TRUE,
+    cluster_columns = FALSE,
+    width = 100,
+  ) %>%
+  split_rows(3) %>% 
+  as_ComplexHeatmap() %>%
+  ComplexHeatmap::draw(heatmap_legend_side = "left", 
+                       padding = unit(c(1, 1, 1, 60), "mm")) #%>% 
+  #save_pdf("~/Work/data/membrane_cleaning/heatmap_counts_initial_biofilm.pdf")
+```
+```{r heatmap_significant_backflush_biofilm, fig.height=7, fig.width = 8}
+counts %>%
+  as_tibble() %>%
+  filter(.feature %in% deg_list_biofilm) %>%
+  mutate(.feature = factor(.feature, levels = deg_list_biofilm)) %>% 
+
+  left_join(MAG_annotation, by = "feature") %>% 
+  separate(feature, sep = "_", into = c(NA, "gene_ID")) %>% 
+
+  mutate( `Gene ID:Function` = paste(gene_ID, gene_function, sep = ":")) %>% 
+  mutate(lane = as.character(lane)) %>% 
+  mutate(cycle = as.character(cycle)) %>% 
+  mutate(`Sample` = paste(condition, "cycle", cycle, "lane", lane)) %>%
+  filter(phase == "backflush") %>%  
+  group_by(condition) %>% 
+
+  heatmap(
+    .column = Sample,
+    .row = `Gene ID:Function`,
+    .value = counts,
+    transform = log1p,
+    name = "log(count + 1)",
+    cluster_rows = TRUE,
+    cluster_columns = FALSE,
+    width = 100,
+  ) %>%
+  split_rows(4) %>% 
+  as_ComplexHeatmap() %>%
+  ComplexHeatmap::draw(heatmap_legend_side = "left", 
+                       padding = unit(c(1, 1, 1, 60), "mm"),)
+```
+```{r biofilm_deg_heatmap_initial, fig.width=7.5}
+MAG_annotation %>% 
+  filter(feature %in% deg_list_biofilm) %>%
+  inner_join(deg_all, by = "feature") %>% 
+  
+  # create heatmap
+  separate(feature, sep = "_", into = c(NA, "gene_ID"), remove = FALSE) %>% 
+
+  mutate(`Gene ID:Function` = paste(gene_ID, gene_function, sep = ":")) %>% 
+  #mutate(custom_name = paste(feature, gene_function, sep = ":")) %>% 
+  mutate(custom_phase = paste(phase, cycle, sep = ":")) %>%
+  select(feature, `log2(foldchange)` = raw_DESeq2_log2FoldChange, 
+         everything()) %>% 
+  filter(`log2(foldchange)` >= log2(2) | `log2(foldchange)` <= log2(0.5)) %>% 
+  filter(phase == "initial") %>% 
+
+  heatmap(
+    .column = cycle,
+    .row = `Gene ID:Function`,
+    .value = `log2(foldchange)`,
+    cluster_rows = FALSE,
+    cluster_columns = FALSE,
+    palette_value = circlize::colorRamp2(c(-2, 0, 2), c("red", "white", "green"))
+  ) %>%
+  layer_text(.value = significant) %>% 
+  as_ComplexHeatmap() %>%
+  ComplexHeatmap::draw(heatmap_legend_side = "left", 
+                       padding = unit(c(1, 1, 1, 7), "cm"),)
+```
+```{r biofilm_deg_heatmap_backflush, fig.height = 1.5, fig.width=10}
+MAG_annotation %>% 
+  filter(feature %in% deg_list_biofilm) %>%
+  inner_join(deg_all, by = "feature") %>% 
+  # create heatmap
+  mutate(custom_name = paste(feature, gene_function, sep = ":")) %>% 
+  mutate(custom_phase = paste(phase, cycle, sep = ":")) %>%
+  select(feature, everything()) %>% 
+  filter(raw_DESeq2_log2FoldChange >= log2(2) | raw_DESeq2_log2FoldChange <= log2(0.5)) %>% 
+  filter(phase == "backflush") %>% 
+
+  heatmap(
+    .column = cycle,
+    .row = custom_name,
+    .value = raw_DESeq2_log2FoldChange,
+    cluster_rows = FALSE,
+    cluster_columns = FALSE,
+    palette_value = circlize::colorRamp2(c(-2, 0, 2), c("red", "white", "green"))
+  ) %>%
+  layer_text(.value = significant) %>% 
+  as_ComplexHeatmap() %>%
+  ComplexHeatmap::draw(heatmap_legend_side = "left", 
+                       padding = unit(c(1, 1, 1, 10), "cm"),)
+```
+## Aggregated (mean) expression
+```{r heatmap_significant_initial_biofilm, fig.height=7, fig.width = 8}
+counts %>%
+  as_tibble() %>%
+  filter(.feature %in% deg_list_biofilm) %>%
+  mutate(.feature = factor(.feature, levels = deg_list_biofilm)) %>% 
+
+  left_join(MAG_annotation, by = "feature") %>% 
+  separate(feature, sep = "_", into = c(NA, "gene_ID")) %>% 
+
+  mutate( `Gene ID:Function` = paste(gene_ID, gene_function, sep = ":")) %>% 
+  mutate(lane = as.character(lane)) %>% 
+  mutate(cycle = as.character(cycle)) %>% 
+  mutate(`Sample` = paste(condition, "cycle", cycle, "lane", lane)) %>%
+  filter(phase == "initial") %>%  
+  
+  ungroup() %>% 
+  select(cycle, counts, condition, `Gene ID:Function`) %>% 
+  mutate(Sample = paste(condition, cycle, sep = ":")) %>% 
+  group_by(`Gene ID:Function`, Sample) %>% 
+  mutate(mean_counts = mean(counts)) %>% 
+  ungroup() %>% 
+  select(-c(counts, cycle)) %>% 
+  distinct() %>% 
+
+  group_by(condition) %>% 
+  heatmap(
+    .column = Sample,
+    .row = `Gene ID:Function`,
+    .value = mean_counts,
+    transform = log1p,
+    name = "log(count + 1)",
+    cluster_rows = TRUE,
+    cluster_columns = FALSE,
+    width = 100,
+  ) %>%
+  split_rows(3) %>% 
+  as_ComplexHeatmap() %>%
+  ComplexHeatmap::draw(heatmap_legend_side = "left", 
+                       padding = unit(c(1, 1, 1, 60), "mm")) #%>% 
+
+  #save_pdf("~/Work/data/membrane_cleaning/heatmap_counts_initial_biofilm.pdf")
+```
+```{r heatmap_significant_backflush_biofilm, fig.height=7, fig.width = 8}
+counts %>%
+  as_tibble() %>%
+  filter(.feature %in% deg_list_biofilm) %>%
+  mutate(.feature = factor(.feature, levels = deg_list_biofilm)) %>% 
+
+  left_join(MAG_annotation, by = "feature") %>% 
+  separate(feature, sep = "_", into = c(NA, "gene_ID")) %>% 
+
+  mutate( `Gene ID:Function` = paste(gene_ID, gene_function, sep = ":")) %>% 
+  mutate(lane = as.character(lane)) %>% 
+  mutate(cycle = as.character(cycle)) %>% 
+  mutate(`Sample` = paste(condition, "cycle", cycle, "lane", lane)) %>%
+  filter(phase == "backflush") %>%  
+  
+  ungroup() %>% 
+  select(cycle, counts, condition, `Gene ID:Function`) %>% 
+  mutate(Sample = paste(condition, cycle, sep = ":")) %>% 
+  group_by(`Gene ID:Function`, Sample) %>% 
+  mutate(mean_counts = mean(counts)) %>% 
+  ungroup() %>% 
+  select(-c(counts, cycle)) %>% 
+  distinct() %>% 
+  group_by(condition) %>% 
+
+  heatmap(
+    .column = Sample,
+    .row = `Gene ID:Function`,
+    .value = mean_counts,
+    transform = log1p,
+    name = "log(count + 1)",
+    cluster_rows = TRUE,
+    cluster_columns = FALSE,
+    width = 100,
+  ) %>%
+  split_rows(4) %>% 
+  as_ComplexHeatmap() %>%
+  ComplexHeatmap::draw(heatmap_legend_side = "left", 
+                       padding = unit(c(1, 1, 1, 60), "mm"),)
+```
